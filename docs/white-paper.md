@@ -169,6 +169,8 @@ ACWR = EWMA_7 / EWMA_28   (uncoupled/EWMA form; descriptive only)
 
 When ≥2 of 3 agree, display: *"Durability fading — remaining work is now mostly fatigue, not stimulus."* This is defensible because the aerobic boundary demonstrably drifts down ~6–10% after ~1,400–1,680 kJ, that drift is measurable via decoupling and power-at-HR, and it correlates with high-end performance loss (rs=0.719). The glycogen-flip and any "damage point" are flagged **speculative** in-app.
 
+**Crucial refinement — not all red is a "turn back."** High fatigue produced by a deliberate hard effort (a max climb, a breakaway, a threshold block) is the *intended* stimulus, not a warning. The productive-window verdict is therefore **conditioned on how the fatigue was earned** — see §8.2 (Feat of Strength vs Attrition). The turn-back signal fires only for *attrition* red (drift at sub-threshold power past the durability anchor), not for *feat-of-strength* red (high output, W′ depletion, best efforts). This prevents the app from scolding a legitimately great hard day.
+
 ---
 
 ## 7. Start-of-ride and end-of-ride fatigue (Question 4)
@@ -178,15 +180,45 @@ When ≥2 of 3 agree, display: *"Durability fading — remaining work is now mos
 
 ---
 
-## 8. Display design (Question 2)
+## 8. Display, effort characterization, and storage
 
-**On-ride data field (single-field and full-screen variants):**
-- **Primary:** Acute Fatigue Index (0–100) with a color band (green/amber/red matching §4.5).
-- **Secondary rotating/secondary fields:** rolling decoupling %, DFA-α1 (with a quality dot), intensity-weighted kJ vs durability anchor, and a start→now fatigue delta.
-- **Productive-window chip:** neutral when open; amber "window closing" when the §6 agreement fires.
-- **Data-quality indicator:** RR artifact %/DFA-α1 validity must be visible; when RR is poor the field silently falls back to decoupling-only and says so.
+### 8.1 The single glance screen (Question 2)
 
-**Post-ride summary:** start-of-ride vs end-of-ride fatigue; fatigue added; peak AFI and time-in-red; decoupling and α1 trajectories; TSS and updated CTL/ATL/TSB.
+**Design premise:** this is *not* a constantly-watched field. It is a large, full-screen layout the rider flips to a handful of times per ride to get a decision — a **"keep going"** or **"turn back / ease off"** call. So it leads with a **verdict**, backed by evidence, readable in a ~2-second glance on the Edge 1050's large color display.
+
+**Layout (top → bottom):**
+1. **Verdict banner (largest element).** One of: **KEEP GOING** (green) · **PRODUCTIVE — EASE SOON** (amber) · **EASE OFF / TURN BACK** (red). When red, a second line names the *kind* of red (§8.2): **"🏅 Feat of Strength"** or **"⚠ Attrition."** This is the headline the rider came for.
+2. **Acute Fatigue Index dial (0–100)** with a green/amber/red arc and three ticks: **start-of-ride** fatigue (carried in), **now**, and **projected end-of-ride** at the current effort. The start→now gap is the fatigue added so far.
+3. **Evidence row (the "why"):** rolling decoupling %, DFA-α1 with a data-quality dot, intensity-weighted kJ vs the personal **durability anchor** (progress bar), and **W′ matches burned**.
+4. **Feats-of-strength strip:** the ride's best efforts so far (e.g., peak 5-min power, biggest climb kJ), matches burned, and residual context (TSB / start fatigue).
+5. **Data-quality footer:** RR artifact %/DFA-α1 validity; when RR is poor, the screen shows the decoupling-only fallback and says so.
+
+**Design rules:** verdict legible at arm's length; numbers secondary; **color is always reinforced by text/icon (never color alone)** — for red-green-colorblind riders and for glance speed.
+
+### 8.2 Characterizing "red": Feat of Strength vs Attrition
+
+Red is not automatically bad — going deep into the red is frequently the *point*. FatigueMeter classifies the **driver** of high fatigue along one physiologically-grounded axis: **is the fatigue being bought with output?**
+
+- **Feat of Strength (productive red).** High fatigue *with* high intensity/output: power ≫ CP, time in the severe domain, **W′ depletions ("matches")**, and in-ride best efforts (power PRs for standard durations). This is intended stimulus. Rendered **red-with-gold** and explicitly *not* a turn-back: the verdict reads *"This is the work — continue if intended."*
+- **Attrition (hole-digging red).** High fatigue with *declining or merely-maintained* output: rising decoupling and α1 drift at **sub-threshold** power, deep past the durability/kJ anchor. The fatigue is drift, not performance — this is the genuine **"ease off / turn back"** red.
+
+**Currency (both computed continuously and stored):**
+```
+FeatScore      ∝ kJ_above_CP + w_sev·(time in severe domain) + Σ(depth of W′ matches) + best-effort bonuses
+AttritionScore ∝ (decoupling above baseline)·(time at sub-threshold power past durability anchor)
+                 + (α1 drift below personal baseline-for-power)
+```
+The verdict blends them: red with **Feat ≫ Attrition** → celebrate/continue; red with **Attrition ≫ Feat** → turn back. A **W′ "match"** = a W′bal depletion below a low threshold (e.g., <20%) followed by partial recovery; matches burned is an intuitive, cyclist-familiar count of hard efforts. **[synthesis — grounded in severe-domain/W′ physiology (Skiba, Schäfer) and durability-drift (Maunder/Stevens), but not a validated classifier; label in-app.]**
+
+### 8.3 Data storage and session results
+
+Two tiers, so markers persist through the ride *and* roll up for cross-ride comparison:
+
+**(a) In-ride time series → FIT developer fields (record messages).** Log continuously (1 Hz, or 5 s for α1) via the Connect IQ **FitContributor** API as `MESG_TYPE_RECORD` developer fields: AFI, F (efficiency/slow drift), decoupling %, DFA-α1, W′bal, intensity-weighted kJ, FeatScore, AttritionScore. Written into the .FIT file, they **flow to Garmin Connect / intervals.icu** for post-ride charting and remain inspectable later.
+
+**(b) Session summary → FIT session fields + persistent app storage.** At ride end, write `MESG_TYPE_SESSION` developer fields **and** persist a compact **Session Result** for cross-ride comparison: date, duration, TSS, **start-of-ride fatigue, end-of-ride fatigue, fatigue added**, peak AFI, **time-in-red split into Feat minutes vs Attrition minutes**, FeatScore + top feats (best 1/5/20-min power, biggest climb, matches burned), AttritionScore, durability anchor reached (kJ), and updated CTL/ATL/TSB. Keep a **rolling history** (e.g., last N sessions) in `Storage`.
+
+**Cross-ride comparison view (post-ride screen / widget):** a compact trend/table of recent Session Results, so the rider can see **"was today a feat-of-strength day or an attrition day?"** relative to previous rides, and watch whether hard days are being bought with performance or paid for with drift. This is the "easy comparing across rides" deliverable.
 
 ---
 
@@ -207,6 +239,9 @@ When ≥2 of 3 agree, display: *"Durability fading — remaining work is now mos
 | RMSSD 25 ms / NFOR 74.6 vs 107.6 ms | Small-sample; use personal baseline instead |
 | DALE τ_st≈28 s, τ_ft≈47 s, severe Ȧ≈88 mL·min⁻² | **Validated** (Gløersen 2022, n=8) |
 | Kalman seed values (§4.4) | **Synthesis** — physiologically motivated, calibrate per athlete |
+| Feat-of-Strength vs Attrition red-typing (§8.2) | **Synthesis** — grounded in severe-domain/W′ physiology + durability drift; not a validated classifier |
+| W′ "match" = W′bal <20% then recovery; matches-burned count | Established concept (Skiba W′bal); threshold is a configurable convention |
+| Best-effort / power-PR bonuses (1/5/20-min) | Established practice (mean-maximal-power / best-effort curves) |
 
 ---
 

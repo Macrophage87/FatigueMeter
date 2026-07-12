@@ -39,11 +39,25 @@ You are an expert Garmin **Connect IQ / Monkey C** developer and exercise-physio
 - At ride end, record **end-of-ride fatigue** and the **fatigue-added delta**, and fold TSS into the ledger.
 - **Productive-window signal** (§6): fire an amber "window closing — remaining work is mostly fatigue, not stimulus" state only when **≥2 of 3** independent signals agree (intensity-weighted kJ near durability anchor; decoupling >8% after ≥60–90 min; DFA-α1 drift/collapse). Never label it "damage."
 
-### Display (white-paper §8)
-- Primary field: **AFI (0–100)** with green/amber/red bands.
-- Secondary: rolling decoupling %, DFA-α1 with a quality dot, kJ-vs-anchor, start→now fatigue delta.
-- A **productive-window chip** and a **data-quality indicator** (RR artifact %/α1 validity). When RR is poor, show the decoupling-only fallback and say so.
-- Post-ride summary screen (or logged fields): start vs end fatigue, fatigue added, peak AFI/time-in-red, decoupling & α1 trajectories, TSS and updated CTL/ATL/TSB.
+### Effort characterizer — Feat of Strength vs Attrition (white-paper §8.2)
+- Implement a `EffortCharacterizer` that continuously computes **FeatScore** and **AttritionScore** per white-paper §8.2, and classifies any red state as **Feat of Strength** (bought with output: P≫CP, severe-domain time, W′ matches, in-ride best efforts) or **Attrition** (drift at sub-threshold power past the durability anchor).
+- Track **W′ "matches"** (W′bal dropping below a configurable ~20% then recovering) and **in-ride best efforts** (best 1/5/20-min mean-maximal power).
+- The productive-window/turn-back verdict must be **conditioned on this classification**: fire "turn back / ease off" only for Attrition-dominant red, and render Feat-dominant red as **red-with-gold "🏅 Feat of Strength — this is the work"** (not a scold). This is a hard requirement — the user deliberately rides deep into the red and the app must not treat every red as a warning.
+
+### Display — the single glance screen (white-paper §8.1)
+Build a **large, full-screen** layout (target the Edge 1050 color display) designed to be flipped to a few times per ride for a decision, **not** watched constantly. Top→bottom:
+1. **Verdict banner** (largest): KEEP GOING (green) · PRODUCTIVE — EASE SOON (amber) · EASE OFF / TURN BACK (red); when red, a second line "🏅 Feat of Strength" or "⚠ Attrition."
+2. **AFI dial (0–100)** with green/amber/red arc and three ticks: start / now / projected end.
+3. **Evidence row:** decoupling %, DFA-α1 + quality dot, kJ vs durability-anchor progress bar, W′ matches burned.
+4. **Feats strip:** best 5-min power, biggest climb kJ, matches burned, TSB/start-fatigue context.
+5. **Data-quality footer:** RR artifact %/α1 validity; decoupling-only fallback shown when RR is poor.
+- **Color must always be reinforced with text/icon (never color alone).**
+
+### Storage — markers through the ride + session results (white-paper §8.3)
+- **In-ride time series:** use the Connect IQ **FitContributor** API to log `MESG_TYPE_RECORD` developer fields (AFI, F, decoupling %, DFA-α1, W′bal, intensity-weighted kJ, FeatScore, AttritionScore) so they appear in the .FIT and sync to Garmin Connect / intervals.icu.
+- **Session summary:** write `MESG_TYPE_SESSION` developer fields **and** persist a compact **Session Result** object (date, duration, TSS, start/end fatigue, fatigue added, peak AFI, time-in-red split Feat vs Attrition, FeatScore + top feats, AttritionScore, durability kJ reached, CTL/ATL/TSB) to `Storage`.
+- Maintain a **rolling history** of the last N Session Results and a **cross-ride comparison view** (post-ride screen or companion widget) so the rider can compare "feat-of-strength day vs attrition day" against prior rides.
+- Persist transactionally so a mid-ride crash cannot corrupt the ledger or session history.
 
 ### Settings (Connect IQ properties)
 Expose: FTP, CP, W′, HR_max, HR_rest, sex, current CTL/ATL seed; all filter τ/κ/gains and Q/R; decoupling and TSB band cutoffs; DFA artifact threshold; unit preferences. Ship documented defaults from the white paper.
@@ -54,9 +68,9 @@ Expose: FTP, CP, W′, HR_max, HR_rest, sex, current CTL/ATL seed; all filter τ
 - Every displayed value that derives from a "convention" or "synthesis" (see white-paper §9 provenance table) must be traceable in code comments to its status, and must not be presented as clinically meaningful. Include the disclaimer that FatigueMeter is not a medical device.
 
 ### Engineering requirements
-- Clean, commented Monkey C; clear module boundaries (`PrimitivesCalculator`, `AcuteFatigueFilter`, `TrainingLoadLedger`, `FatigueMeterView`, `FatigueMeterApp`, settings). No blocking work in `compute()`; keep the 1 Hz path light and budget the DFA-α1 recompute.
+- Clean, commented Monkey C; clear module boundaries (`PrimitivesCalculator`, `AcuteFatigueFilter`, `EffortCharacterizer`, `TrainingLoadLedger`, `FitLogger` (FitContributor record/session fields), `SessionStore` (persistent Session Results + rolling history), `FatigueMeterView`, `FatigueMeterApp`, settings). No blocking work in `compute()`; keep the 1 Hz path light and budget the DFA-α1 recompute.
 - Numerically guard against divide-by-zero (HR=0, power=0), sensor dropouts, and RR gaps. Persist ledger state transactionally so a crash mid-ride cannot corrupt CTL/ATL.
-- Provide unit-testable pure functions for every formula (DFA-α1, NP, decoupling, TSS, CTL/ATL/TSB, Kalman predict/update) so the validation harness (`docs/prompts/scientific-validation-prompt.md`) can exercise them off-device.
+- Provide unit-testable pure functions for every formula (DFA-α1, NP, decoupling, TSS, CTL/ATL/TSB, Kalman predict/update, W′bal, FeatScore/AttritionScore, match detection) so the validation harness (`docs/prompts/scientific-validation-prompt.md`) can exercise them off-device.
 - Include a `manifest.xml`, `monkey.jungle`, resource/layout files, and a short `BUILD.md` with build/sideload steps for the Edge 1050. Add a `docs/traceability.md` mapping each implemented constant/threshold back to its white-paper table row and reference.
 
 ### Deliverables

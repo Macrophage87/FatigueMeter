@@ -19,9 +19,11 @@ This repository currently holds the **research and design layer**. It is not yet
 ## The questions this project tries to answer
 
 1. **Model fatigue on two timescales** — acute fatigue accumulated *during* a ride, and residual fatigue carried from a longer training program — with reasonable metrics for each, including both the raw numbers and the point at which those numbers become *concerning*.
-2. **Provide and display on-ride fatigue metrics** in real time.
+2. **Provide on-ride fatigue metrics on a single large "decision" screen** — a full-screen glance layout the rider flips to a few times per ride for a "keep going" or "turn back / ease off" call, not a field watched constantly.
 3. **Estimate the productive-to-damaging transition** — if the evidence supports it, flag when a ride shifts from being a productive training stimulus to mainly additional fatigue and damage.
 4. **Model the fatigue metric at both the start and the end of a ride**, so residual (pre-ride) fatigue and end-of-ride fatigue are both represented.
+5. **Store the markers through the ride and roll them into a session result** (via FIT developer fields + persistent storage) for easy comparison across rides.
+6. **Characterize *why* the athlete is in the red** — distinguish a **Feat of Strength** (extreme fatigue bought with real output: big efforts, W′ "matches," power PRs) from **Attrition** (fatigue from drift/hole-digging), so a deliberately hard day is celebrated rather than scolded. Green/amber/red is retained, with a gold accent for feats of strength.
 
 ## Repository structure
 
