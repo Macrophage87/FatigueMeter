@@ -1,0 +1,182 @@
+using Toybox.Lang;
+using Toybox.Test;
+using Toybox.Math;
+
+//! Off-device unit tests for the pure formula functions (generation prompt
+//! deliverable §3). Run with the Connect IQ test runner:
+//!     monkeydo bin/FatigueMeter.prg <device> -t
+//!
+//! These exercise coding correctness of each formula. The SEPARATE Python
+//! model-consistency harness (docs/prompts/scientific-validation-prompt.md)
+//! checks behaviour against the documented model — that is regression protection,
+//! not external validity.
+module PureFunctionTests {
+
+    hidden function near(a, b, tol) {
+        var d = a - b;
+        if (d < 0) { d = -d; }
+        return d <= tol;
+    }
+
+    (:test)
+    function testNormalizedPowerConstant(logger) {
+        // constant 200 W -> NP = 200
+        var p = [200.0, 200.0, 200.0, 200.0];
+        var np = PrimitivesCalculator.normalizedPower(p);
+        return near(np, 200.0, 0.001);
+    }
+
+    (:test)
+    function testNormalizedPowerVariable(logger) {
+        // NP of [100,300] 4th-root of mean of 4th powers > mean(200)
+        var np = PrimitivesCalculator.normalizedPower([100.0, 300.0]);
+        return np > 200.0 && np < 300.0;
+    }
+
+    (:test)
+    function testDecouplingIdentity(logger) {
+        // EF drops 10% -> decoupling ~10%
+        var d = PrimitivesCalculator.decouplingPct(2.0, 1.8);
+        return near(d, 10.0, 0.001);
+    }
+
+    (:test)
+    function testWeightForPower(logger) {
+        var wBelow = PrimitivesCalculator.weightForPower(200.0, 250.0);
+        var wAt2x = PrimitivesCalculator.weightForPower(500.0, 250.0);
+        return near(wBelow, 1.0, 0.001) && near(wAt2x, 3.0, 0.001);
+    }
+
+    (:test)
+    function testWprimeDepletionRecovery(logger) {
+        // above CP depletes; below CP recovers
+        var w = 20000.0;
+        var depleted = PrimitivesCalculator.wprimeBalStep(w, 400.0, 250.0, 20000.0, 1.0);
+        var recovered = PrimitivesCalculator.wprimeBalStep(depleted, 100.0, 250.0, 20000.0, 1.0);
+        return depleted < w && recovered > depleted;
+    }
+
+    (:test)
+    function testTssOneHourFtp(logger) {
+        // 1 h at FTP -> ~100 TSS
+        var tss = TrainingLoadLedger.tss(3600, 250.0, 250.0);
+        return near(tss, 100.0, 0.01);
+    }
+
+    (:test)
+    function testTsbIdentity(logger) {
+        // TSB == CTL - ATL exactly
+        var tsb = TrainingLoadLedger.tsbFrom(80.0, 95.0);
+        return near(tsb, -15.0, 0.0000001);
+    }
+
+    (:test)
+    function testEwmaFold(logger) {
+        // CTL fold toward a higher load rises
+        var next = TrainingLoadLedger.ewmaFold(70.0, 200.0, 42.0);
+        return next > 70.0 && next < 200.0;
+    }
+
+    (:test)
+    function testTrimpPositive(logger) {
+        var t = TrainingLoadLedger.trimpIncrement(150.0, 50.0, 190.0, 60.0, 0.64, 1.92);
+        return t > 0.0 && MathUtil.isFinite(t);
+    }
+
+    (:test)
+    function testAfiBounds(logger) {
+        var lo = AcuteFatigueFilter.afiFromF(-5.0, 12.0);
+        var hi = AcuteFatigueFilter.afiFromF(999.0, 12.0);
+        return near(lo, 0.0, 0.001) && near(hi, 100.0, 0.001);
+    }
+
+    (:test)
+    function testBlendContinuity(logger) {
+        // full RR weight -> pure kalman; zero -> pure decoupling
+        var k = AcuteFatigueFilter.blendAfi(80.0, 20.0, 1.0);
+        var d = AcuteFatigueFilter.blendAfi(80.0, 20.0, 0.0);
+        return near(k, 80.0, 0.001) && near(d, 20.0, 0.001);
+    }
+
+    (:test)
+    function testRrWeight(logger) {
+        // artifact at good -> 1 ; at gate -> 0
+        var wGood = AcuteFatigueFilter.rrWeight(1.0, 1.0, 5.0);
+        var wGate = AcuteFatigueFilter.rrWeight(5.0, 1.0, 5.0);
+        return near(wGood, 1.0, 0.001) && near(wGate, 0.0, 0.001);
+    }
+
+    (:test)
+    function testChargeGradedAndActiveGated(logger) {
+        // charge larger above AeT; kappa_d only while active
+        var above = AcuteFatigueFilter.chargeTerm(320.0, 240.0, 0.0016, 0.00035, true);
+        var below = AcuteFatigueFilter.chargeTerm(150.0, 240.0, 0.0016, 0.00035, true);
+        var coasting = AcuteFatigueFilter.chargeTerm(150.0, 240.0, 0.0016, 0.00035, false);
+        return above > below && below > coasting && near(coasting, 0.0, 1e-9);
+    }
+
+    (:test)
+    function testA1TargetFalling(logger) {
+        // sigmoid crosses ~0.75 at P_AeT and falls with power
+        var atAet = AcuteFatigueFilter.a1Target(240.0, 240.0, 1.1, 0.6, 0.02);
+        var high = AcuteFatigueFilter.a1Target(360.0, 240.0, 1.1, 0.6, 0.02);
+        return near(atAet, 0.8, 0.06) && high < atAet;
+    }
+
+    (:test)
+    function testDfaOnCorrelatedSeries(logger) {
+        // a smooth (correlated) RR series should give α1 well above 0.5
+        var rr = [];
+        var base = 900.0;
+        for (var i = 0; i < 200; i++) {
+            base += (i % 7) - 3;               // slow wander -> correlated
+            rr.add(base);
+        }
+        var res = DfaAlpha1.compute(rr, 4, 16);
+        return res[0] > 0.5 && MathUtil.isFinite(res[0]);
+    }
+
+    (:test)
+    function testKalmanUpdateMovesState(logger) {
+        // a scalar HR update pulls the HR state toward the measurement
+        var x = [0.0, 100.0, 0.75, 0.0];
+        var P = KalmanMath.zeros4x4();
+        P[1][1] = 25.0;
+        var H = [0.0, 1.0, 0.0, 0.0];
+        var r = KalmanMath.scalarUpdate(x, P, H, 120.0, 4.0);
+        var xn = r[0];
+        return xn[1] > 100.0 && xn[1] < 120.0;
+    }
+
+    (:test)
+    function testAlpha1CouplesIntoF(logger) {
+        // Structural fusion check (harness §2): an α1 BELOW A1_target must move F.
+        var cfg = new Config();
+        var filt = new AcuteFatigueFilter(cfg);
+        // run steady power with α1 pinned well below its power-predicted target
+        var lowA1 = AcuteFatigueFilter.a1Target(cfg.pAeT, cfg.pAeT, cfg.a0, cfg.a1, cfg.sigmoidS) - 0.3;
+        var m = Signals.Metric.ok(lowA1, 1.0);
+        var f0 = filt.fState();
+        for (var i = 0; i < 120; i++) {
+            filt.step(cfg.pAeT, 140.0, m, 0.0, 0.2, true, true);
+        }
+        return filt.fState() > f0;   // α1 innovation genuinely informed F
+    }
+
+    (:test)
+    function testRespirationDoesNotManufactureFatigue(logger) {
+        // harness §2: a rapid-fB excursion inflates R_A1 so F barely moves.
+        var cfg = new Config();
+        var filt = new AcuteFatigueFilter(cfg);
+        var a1 = AcuteFatigueFilter.a1Target(cfg.pAeT, cfg.pAeT, cfg.a0, cfg.a1, cfg.sigmoidS);
+        var m = Signals.Metric.ok(a1 - 0.3, 1.0);
+        var f0 = filt.fState();
+        var fbNow = 0.2;
+        for (var i = 0; i < 60; i++) {
+            fbNow += 0.15;                       // rapidly changing respiration
+            filt.step(cfg.pAeT, 140.0, m, 0.0, fbNow, true, true);
+        }
+        // With inflated R_A1 the F rise stays small relative to the coupled case.
+        return (filt.fState() - f0) < 3.0;
+    }
+}

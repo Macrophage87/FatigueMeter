@@ -1,0 +1,57 @@
+<properties>
+    <!--
+      Persistent Application.Properties. Defaults are the documented white-paper
+      values. Every value flagged "convention" or "synthesis" in white-paper §9
+      is exposed here (not hard-coded) so the honesty requirement holds: changing
+      the setting changes behaviour. See docs/traceability.md for provenance.
+    -->
+
+    <!-- Athlete profile -->
+    <property id="ftp"            type="number">250</property>
+    <property id="cp"             type="number">240</property>
+    <property id="wPrime"         type="number">20000</property>
+    <property id="hrMax"          type="number">190</property>
+    <property id="hrRest"         type="number">50</property>
+    <property id="sexFemale"      type="boolean">false</property>
+    <property id="ctlSeed"        type="float">70.0</property>
+    <property id="atlSeed"        type="float">70.0</property>
+
+    <!-- Acute Kalman filter seeds / gains (white paper §4.4 — all synthesis-grade) -->
+    <property id="tauHr"          type="float">30.0</property>
+    <property id="tauA"           type="float">90.0</property>
+    <property id="tauRec"         type="float">900.0</property>
+    <property id="kappaI"         type="float">0.000145</property>
+    <property id="kappaD"         type="float">0.0028</property>
+    <property id="cF"             type="float">0.0167</property>
+    <property id="fRef"           type="float">12.0</property>
+    <property id="a0"             type="float">1.1</property>
+    <property id="a1"             type="float">0.6</property>
+    <property id="sigmoidS"       type="float">0.02</property>
+    <property id="gP"             type="float">0.15</property>
+    <property id="qHr"            type="float">0.5</property>
+    <property id="qHrLat"         type="float">0.5</property>
+    <property id="qA1"            type="float">0.002</property>
+    <property id="qF"             type="float">0.05</property>
+    <property id="rHr"            type="float">4.0</property>
+    <property id="rA1"            type="float">0.0225</property>
+
+    <!-- Layer-1 bands / thresholds (convention defaults) -->
+    <property id="decoupOk"       type="float">5.0</property>
+    <property id="decoupCaution"  type="float">8.0</property>
+    <property id="decoupHigh"     type="float">10.0</property>
+    <property id="artifactGate"   type="float">5.0</property>
+    <property id="powerCvGate"    type="float">0.10</property>
+    <property id="coastFracGate"  type="float">0.10</property>
+    <property id="kjAnchor"       type="float">2000.0</property>
+
+    <!-- Layer-3 TSB / load -->
+    <property id="tsbFresh"       type="float">10.0</property>
+    <property id="tsbOverreach"   type="float">-30.0</property>
+    <property id="trimpFemaleCoeff" type="float">0.86</property>
+    <property id="acwrEnabled"    type="boolean">false</property>
+
+    <!-- Honesty / release gates -->
+    <property id="positivePilot"       type="boolean">false</property>
+    <property id="shipNumberOverride"  type="boolean">false</property>
+    <property id="unitsMetric"         type="boolean">true</property>
+</properties>

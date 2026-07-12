@@ -1,0 +1,11 @@
+# FatigueMeter — Monkey C build configuration.
+#
+# Default source + resource roots. All logic lives under source/; every
+# physiological constant is centralised in source/Constants.mc and mapped in
+# docs/traceability.md (no constant may appear in code without a traceability
+# row — white paper §9).
+
+project.manifest = manifest.xml
+
+base.sourcePath = source
+base.resourcePath = resources
