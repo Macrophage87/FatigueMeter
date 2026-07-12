@@ -139,6 +139,8 @@ Cross-checked against, and blended with, the model-free decoupling% and DFA-α1 
 | AFI 60–85, decoupling >8%, α1 drifting toward 0.5 | High fatigue; durability fading | durability drift; α1 fatigue drift |
 | AFI > 85, or α1 < 0.5 at sub-threshold power, or α1 ≳0.3 below baseline-for-power | Severe; window closing | α1 collapse empirical anchor (0.32–0.37 when fatigued) |
 
+> **Caveat on the severe band:** Rogers et al. (2025) found that in a cycling time-to-task-failure, **not all athletes reached anticorrelated α1 (<0.5) even at the moment of failure** — failure occurred across a *range* of personal α1 values, and α1 threshold validity degrades once fatigued. Therefore the **per-athlete "≳0.3 below baseline-for-power" drift is the more reliable severe trigger than the absolute α1 < 0.5**, and the absolute cutoff should be treated as corroborating, not decisive.
+
 ---
 
 ## 5. Layer 3 — Residual training-scale fatigue
@@ -194,9 +196,9 @@ When ≥2 of 3 agree, display: *"Durability fading — remaining work is now mos
 |---|---|
 | DFA-α1 = 0.75 (aerobic threshold) | **Validated** (r=0.99 VO₂, ICC 0.99); ±10 bpm individual LoA |
 | DFA-α1 = 0.5 (anaerobic threshold) | Moderately validated (cyclists r≈0.93 power) |
-| DFA-α1 < 0.5 / ≳0.3-below-baseline as fatigue flag | **Synthesis** — anchored on empirical 0.32–0.37 in fatigued athletes |
+| DFA-α1 < 0.5 / ≳0.3-below-baseline as fatigue flag | **Synthesis** — anchored on empirical Q1→Q4 ~1.2→~0.75 drift (Rogers 2025); absolute <0.5 not universal (many fail above it), so per-athlete baseline drift preferred |
 | Decoupling <5 / 5–8 / >8–10% | Coaching convention (Friel/TrainingPeaks); not a validated damage cutoff |
-| ~0.6% decoupling per rpm cadence decline | Barsumyan 2026 (abstract-level) |
+| ~0.6% decoupling per rpm cadence decline | **Verified** (Barsumyan 2026 full text: b=0.61 drift / 0.58 decoupling); no threshold established |
 | Durability −6 to −10% VT1 after ~1,400–1,680 kJ | **Validated** (Maunder/Stevens) |
 | kJ anchors 1,500 / 2,500 | Population-level (Spragg / review); person-specific in practice |
 | CTL/ATL/TSB (42/7-day EWMA), TSS formula | **Standard/established** |
