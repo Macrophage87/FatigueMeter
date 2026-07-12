@@ -1,0 +1,11 @@
+# LaTeX build intermediates
+build/
+*.aux
+*.log
+*.out
+*.fls
+*.fdb_latexmk
+*.toc
+*.synctex.gz
+*.bbl
+*.blg

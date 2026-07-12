@@ -43,17 +43,19 @@
 \captionsetup{font=small,labelfont=bf,labelsep=period}
 \setlist{itemsep=2pt,topsep=3pt}
 
+% Reduce overfull boxes globally (lets TeX stretch spacing on hard lines)
+\emergencystretch=2.5em
+
 % Convenience macros (mode-agnostic so they are safe in text and math)
-\newcommand{\afi}{\textsc{afi}}
+\newcommand{\afi}{\textup{\textsc{afi}}}
 \newcommand{\aone}{\ensuremath{\text{DFA-}\alpha_1}}
 \newcommand{\Fstate}{\ensuremath{F}}
 
 \title{\vspace{-1.5em}\bfseries\color{ink}\LARGE FatigueMeter: A Multi-Timescale Model for Estimating Cyclist Fatigue from Power, Heart Rate, and Heart-Rate Variability}
 
 \author{%
-  \normalsize [Author Name(s)]\\[2pt]
-  \small\itshape [Affiliation]\\
-  \small\texttt{[correspondence@example.org]}%
+  \normalsize Stephen Cieply\\[2pt]
+  \small\texttt{\href{mailto:sjcieply@gmail.com}{sjcieply@gmail.com}}%
 }
 \date{\today}
 
@@ -226,10 +228,10 @@ The graded concern scale is given in \autoref{tab:bands}. Verdict gating uses pe
 
 \begin{table}[h]
 \centering
-\small
+\footnotesize
 \caption{Graded concern scale (configurable defaults). Gating relies on per-athlete drift; absolute cut-offs are convention-grade.}
 \label{tab:bands}
-\begin{tabularx}{\linewidth}{@{}l X l@{}}
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}X l@{}}
 \toprule
 \textbf{Signal} & \textbf{State} & \textbf{Basis} \\
 \midrule
@@ -293,8 +295,9 @@ A recorded design decision governs the dial. A number on a dial reads as a measu
 \subsection{Characterising red: Feat of Strength versus Attrition}\label{sec:featattr}
 Going deep into the red is frequently the point. The system classifies the driver of high fatigue along one axis: is the fatigue being bought with output? \emph{Feat of Strength} is high fatigue with high output --- power well above CP, time in the severe domain, $W'$ depletions (``matches''), and in-ride best efforts --- rendered as intended stimulus, not a warning. \emph{Attrition} is high fatigue with declining or merely maintained output --- rising decoupling and $\aone$ drift at sub-threshold power, deep past the durability anchor --- the genuine ease-off case. Two scores summarise this:
 \begin{align}
-\text{FeatScore} &\propto \text{kJ}_{>\text{CP}} + w_{\text{sev}}\,t_{\text{severe}} + \textstyle\sum(\text{match depth}) + \text{best-effort bonuses},\\
-\text{AttritionScore} &\propto (\text{decoupling above baseline})\cdot t_{\text{sub-threshold, past anchor}} + (\aone\ \text{drift below baseline}),
+\text{FeatScore} &\propto \text{kJ}_{>\text{CP}} + w_{\text{sev}}\,t_{\text{severe}} + \textstyle\sum(\text{match depth}) + \text{best-effort bonuses},\nonumber\\
+\text{AttritionScore} &\propto (\text{decoupling above baseline})\cdot t_{\text{sub-threshold, past anchor}}\nonumber\\
+&\qquad + (\aone\ \text{drift below baseline}),
 \label{eq:scores}
 \end{align}
 where a $W'$ ``match'' is a $W'$-balance depletion below a low threshold followed by partial recovery~\cite{skiba}. This classifier has arbitrary weights, no labelled training data, no ground-truth class definition, and no measured error rate; it therefore does not gate the headline status. The two scores are shown as raw evidence to contextualise a red state, and the underlying $W'$-balance chain depends on a possibly stale CP/$W'$, which is surfaced as a data-quality caveat.
@@ -307,7 +310,7 @@ No single sensor failure may inhibit the calculation or display of anything that
 
 \begin{table}[h]
 \centering
-\small
+\footnotesize
 \caption{Graceful-degradation matrix. Each missing input degrades only its dependents; everything else keeps updating.}
 \label{tab:degradation}
 \begin{tabularx}{\linewidth}{@{}l X X@{}}
@@ -335,7 +338,7 @@ Every numeric threshold is graded on two orthogonal axes (\autoref{tab:provenanc
 
 \begin{table}[h]
 \centering
-\small
+\footnotesize
 \caption{Provenance of the principal numeric thresholds. ``Synth.'' denotes a modelling construct rather than a measured value.}
 \label{tab:provenance}
 \begin{tabularx}{\linewidth}{@{}l l X@{}}
