@@ -1,0 +1,84 @@
+<strings>
+    <string id="AppName">FatigueMeter</string>
+
+    <!--
+      ALLOWED DESCRIPTIVE-COPY LIST (white paper §6, §8.1).
+      Every user-facing status / advisory string is drawn from this list.
+      RULE: descriptive mood only — NO imperative verbs ("turn back", "ease off",
+      "back off", "stop", "slow down" are all forbidden). The validation harness
+      (scientific-validation-prompt.md §2) checks MOOD, not a substring blacklist.
+    -->
+    <string id="StateFresh">FRESH / PRODUCTIVE</string>
+    <string id="StateBuilding">FATIGUE BUILDING</string>
+    <string id="StateDrifting">DURABILITY MARKERS DRIFTING</string>
+    <string id="StateNoData">SENSORS UNAVAILABLE</string>
+
+    <string id="RedFeat">Feat of Strength</string>
+    <string id="RedAttrition">Attrition</string>
+
+    <!-- Persistent honesty tags (white paper §8.1, §10) -->
+    <string id="AdvisoryTag">advisory · not a validated measurement</string>
+    <string id="UncalibratedTag">uncalibrated — estimate only</string>
+    <string id="DecoupOnlyTag">decoupling-only (RR poor)</string>
+    <string id="NotMedical">Not a medical device · within-ride fatigue unvalidated outdoors</string>
+
+    <!-- Coarse start-of-ride / fatigue-added buckets (white paper §7) -->
+    <string id="BucketFresh">fresh</string>
+    <string id="BucketModerate">moderately loaded</string>
+    <string id="BucketHeavy">heavily loaded</string>
+
+    <!-- Settings menu labels -->
+    <string id="SetGroupProfile">Athlete profile</string>
+    <string id="SetFtp">FTP (W)</string>
+    <string id="SetCp">Critical Power (W)</string>
+    <string id="SetWprime">W′ (J)</string>
+    <string id="SetHrMax">HR max (bpm)</string>
+    <string id="SetHrRest">HR rest (bpm)</string>
+    <string id="SetSex">Sex</string>
+    <string id="SexMale">Male</string>
+    <string id="SexFemale">Female</string>
+    <string id="SetCtlSeed">CTL seed</string>
+    <string id="SetAtlSeed">ATL seed</string>
+
+    <string id="SetGroupFilter">Acute filter (advanced)</string>
+    <string id="SetTauHr">τ_HR (s)</string>
+    <string id="SetTauA">τ_α1 (s)</string>
+    <string id="SetTauRec">τ_rec (s)</string>
+    <string id="SetKappaI">κ_i intensity charge</string>
+    <string id="SetKappaD">κ_d duration charge</string>
+    <string id="SetCf">c_F (α1↔F gain)</string>
+    <string id="SetFref">F_ref (bpm)</string>
+
+    <string id="SetGroupBands">Bands &amp; thresholds</string>
+    <string id="SetDecoupOk">Decoupling OK %</string>
+    <string id="SetDecoupCaution">Decoupling caution %</string>
+    <string id="SetDecoupHigh">Decoupling high %</string>
+    <string id="SetArtifactGate">DFA artifact gate %</string>
+    <string id="SetKjAnchor">Durability kJ anchor</string>
+    <string id="SetTrimpFemaleCoeff">TRIMP female coeff (0.86/0.64)</string>
+
+    <string id="SetAfiFresh">AFI fresh cutoff</string>
+    <string id="SetAfiBuilding">AFI building cutoff</string>
+    <string id="SetAfiDriftMargin">AFI drift margin</string>
+    <string id="SetDecoupRef">Decoupling AFI ref %</string>
+    <string id="SetTsbFresh">TSB fresh band</string>
+    <string id="SetTsbOverreach">TSB overreach band</string>
+    <string id="SetPowerCvGate">Steadiness power CV gate</string>
+    <string id="SetCoastFracGate">Coasting fraction gate</string>
+    <string id="SetGp">g_P gain (bpm/W)</string>
+    <string id="SetA0">Sigmoid a0</string>
+    <string id="SetA1">Sigmoid a1</string>
+    <string id="SetSigmoidS">Sigmoid slope s</string>
+    <string id="SetQHr">Q HR_ss</string>
+    <string id="SetQHrLat">Q HR</string>
+    <string id="SetQA1">Q α1</string>
+    <string id="SetQF">Q F</string>
+    <string id="SetRHr">R HR</string>
+    <string id="SetRA1">R α1</string>
+
+    <string id="SetGroupOptions">Options</string>
+    <string id="SetAcwrEnabled">Show ACWR (opt-in, contested)</string>
+    <string id="SetPositivePilot">Numeric AFI unlocked (pilot)</string>
+    <string id="SetShipNumberOverride">Ship AFI number pre-pilot (override)</string>
+    <string id="SetUnitsMetric">Metric units</string>
+</strings>
