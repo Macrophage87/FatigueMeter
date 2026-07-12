@@ -46,7 +46,14 @@ module Constants {
     const TAU_HR = 30.0;     // HR kinetics
     const TAU_A = 90.0;      // α1 responds slowly
     const TAU_REC = 900.0;   // within-ride partial recovery — UNSOURCED engineering guess
-    const G_P = 0.15;        // static power->HR gain ≈ (HRmax-HRrest)/Pmax, bpm/W
+    // Static power->HR gain: HR_ss = HR_rest + G_P*P must ~= the FRESH HR the
+    // power elicits, else F absorbs a static-gain error and AFI saturates. The
+    // model-consistency harness flagged the white paper's =~0.15 (which implies
+    // P_max~=930 W, a sprint peak) as producing a saturated AFI on a plain Z2
+    // ride, violating §4.4's own "long Z2 -> moderate" requirement. The correct
+    // denominator is the power AT HR_max (~threshold): (190-50)/~310 ~= 0.45.
+    // Synthesis / hand-set (§9) and a live setting - calibrate per athlete.
+    const G_P = 0.45;        // static power->HR gain, bpm/W
     const SIG_A0 = 1.1;      // A1_target sigmoid upper
     const SIG_A1 = 0.6;      // A1_target sigmoid span
     const SIG_S = 0.02;      // A1_target sigmoid slope (1/W)

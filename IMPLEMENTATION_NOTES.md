@@ -119,6 +119,18 @@ It is a required deliverable of `docs/prompts/connectiq-app-generation-prompt.md
     for export, but the in-app/cross-ride presentation is bucketed, matching the
     start-of-ride treatment.
 
+16. **`g_P` corrected from 0.15 → 0.45 (found by the validation harness).** The
+    white paper gives `g_P ≈ (HR_max−HR_rest)/P_max ≈ 0.15 bpm/W`, but 0.15
+    implies `P_max ≈ 930 W` (a sprint peak). With it, `HR_ss = HR_rest + g_P·P`
+    underestimates fresh HR by ~50 bpm at endurance power, so `F` absorbs the
+    static-gain error and **AFI saturates to ~100 on every ride** — violating the
+    white paper's own §4.4 requirement that a long steady Z2 ride yields a
+    *moderate*, not severe, AFI (the model-consistency harness's `P9` check caught
+    this). The correct denominator is the **power at HR_max** (~threshold):
+    `(190−50)/~310 ≈ 0.45`. `g_P` is synthesis/hand-set (§9) and a live setting, so
+    this is a defaults correction, not a new physiological claim; calibration fits
+    it per athlete.
+
 ## C. Values exposed as SETTINGS because the science flags them convention/synthesis
 
 All are in `resources/properties/properties.xml` (defaults) and

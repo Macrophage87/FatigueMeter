@@ -214,18 +214,22 @@ module PureFunctionTests {
 
     (:test)
     function testRespirationDoesNotManufactureFatigue(logger) {
-        // harness §2: a rapid-fB excursion inflates R_A1 so F barely moves.
+        // harness §2: isolate the α1 channel — two filters with IDENTICAL power/HR
+        // (so the HR-driven F is identical), differing only in fB. With rapid fB,
+        // R_A1 inflates so the α1-below-target excursion moves F LESS than with
+        // stable fB.
         var cfg = new Config();
-        var filt = new AcuteFatigueFilter(cfg);
-        var a1 = AcuteFatigueFilter.a1Target(cfg.pAeT, cfg.pAeT, cfg.a0, cfg.a1, cfg.sigmoidS);
-        var m = Signals.Metric.ok(a1 - 0.3, 1.0);
-        var f0 = filt.fState();
-        var fbNow = 0.2;
+        var stable = new AcuteFatigueFilter(cfg);
+        var rapid = new AcuteFatigueFilter(cfg);
+        var a1v = AcuteFatigueFilter.a1Target(cfg.pAeT, cfg.pAeT, cfg.a0, cfg.a1, cfg.sigmoidS) - 0.3;
+        var m = Signals.Metric.ok(a1v, 1.0);
+        var fb = 0.25;
         for (var i = 0; i < 60; i++) {
-            fbNow += 0.15;                       // rapidly changing respiration
-            filt.step(cfg.pAeT, 140.0, m, 0.0, fbNow, true, true);
+            var fbRapid = fb + 0.15;             // large |Δfb| every step
+            stable.step(cfg.pAeT, 140.0, m, 0.0, 0.25, true, true);
+            rapid.step(cfg.pAeT, 140.0, m, 0.0, fbRapid, true, true);
+            fb = fbRapid;
         }
-        // With inflated R_A1 the F rise stays small relative to the coupled case.
-        return (filt.fState() - f0) < 3.0;
+        return rapid.fState() < stable.fState();
     }
 }
