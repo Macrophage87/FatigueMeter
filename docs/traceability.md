@@ -16,8 +16,12 @@
 | `ACWR_*` | 0.8–1.3 / 1.5 | ACWR | Impellizzeri/Lolli | High | **Contested** — opt-in, off by default |
 | `TAU_ST / TAU_FT` | 28 / 47 s | DALE constants | Gløersen 2022 | High | **Validated for VO₂ only (n=8) — does not transfer to `F`** |
 | `TAU_HR / TAU_A / TAU_REC` | 30 / 90 / 900 s | Kalman seeds §4.4 | Synthesis | n/a | Synthesis / **τ_rec unsourced**; calibrate per athlete |
-| `KAPPA_I / KAPPA_D / C_F` | tuned | Kalman seeds §4.4 | Synthesis | n/a | Hand-set; no on-bike ground truth |
+| `KAPPA_I / KAPPA_D` | tuned | Kalman seeds §4.4 | Synthesis | n/a | Hand-set; no on-bike ground truth; `KAPPA_D` charges only while active |
+| `C_F` | tuned (~0.2 α1 @ F_ref) | Kalman seeds §4.4 | Synthesis | n/a | Unvalidatable cross-signal gain; **inherits weakness of `F_REF` and `A1_SIGMOID`**; 0.2 anchor possibly ~2× low vs Rogers 2025 |
 | `F_REF` | ~12 bpm | AFI scaling §4.5 | Synthesis | n/a | **AFI linear in 1/F_ref** — sets whole scale; sensitivity must be surfaced |
+| `AFI_SEVERE` / band cutoffs | 85 / … | AFI bands §4.5 | Convention | n/a | `F_ref`-dependent absolute-in-disguise; also fires on per-athlete AFI drift; calibrate |
+| `PROJECTED_AFI` | forecast | dial §8.1 | Synthesis | n/a | Forecast on hand-set κ/τ_rec + constant-power assumption; **gated on pilot; render as range** |
+| `F0_SEED f()` | ATL/TSB/RMSSD→bpm | seeding §7 | Synthesis | n/a | Cross-domain, uncited; presented as coarse bucket |
 | `A1_SIGMOID (a0,a1,s)` | 1.1, 0.6, 0.02/W | A1_target map | PMC11280911 | High | Population map **not universal** (44% |r|>0.7); calibrate per athlete |
 | `WPRIME_MATCH_THRESH` | <20% then recovery | W′ match | Skiba | High | Established; depends on good CP/W′ |
 | `TRIMP_COEFF_F` | **UNRESOLVED (0.86 vs 0.64)** | Banister female coeff | references.md | 🟡 | **Defect — resolve vs Banister 1991 or expose as setting before shipping** |
