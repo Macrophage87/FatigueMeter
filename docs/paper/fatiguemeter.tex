@@ -1,0 +1,456 @@
+\documentclass[11pt]{article}
+
+% ------------------------------------------------------------------
+% FatigueMeter: standalone journal-style white paper
+% Compiles with pdfLaTeX (run twice for cross-references/citations).
+% Author/affiliation are placeholders -- edit the \author block below.
+% ------------------------------------------------------------------
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{caption}
+\usepackage{abstract}
+
+\definecolor{accent}{HTML}{1A5FB4}
+\definecolor{ink}{HTML}{1A3A5F}
+
+\usepackage[colorlinks=true,
+            linkcolor=accent,
+            citecolor=accent,
+            urlcolor=accent,
+            filecolor=accent,
+            breaklinks=true]{hyperref}
+
+% Modern section styling
+\titleformat{\section}{\normalfont\Large\bfseries\color{ink}}{\thesection}{0.75em}{}
+\titleformat{\subsection}{\normalfont\large\bfseries\color{ink}}{\thesubsection}{0.65em}{}
+\titleformat{\subsubsection}{\normalfont\normalsize\bfseries\color{ink}}{\thesubsubsection}{0.6em}{}
+
+% Abstract styling
+\renewcommand{\abstractnamefont}{\normalfont\bfseries\color{ink}}
+\renewcommand{\abstracttextfont}{\normalfont\small}
+
+\captionsetup{font=small,labelfont=bf,labelsep=period}
+\setlist{itemsep=2pt,topsep=3pt}
+
+% Convenience macros (mode-agnostic so they are safe in text and math)
+\newcommand{\afi}{\textsc{afi}}
+\newcommand{\aone}{\ensuremath{\text{DFA-}\alpha_1}}
+\newcommand{\Fstate}{\ensuremath{F}}
+
+\title{\vspace{-1.5em}\bfseries\color{ink}\LARGE FatigueMeter: A Multi-Timescale Model for Estimating Cyclist Fatigue from Power, Heart Rate, and Heart-Rate Variability}
+
+\author{%
+  \normalsize [Author Name(s)]\\[2pt]
+  \small\itshape [Affiliation]\\
+  \small\texttt{[correspondence@example.org]}%
+}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent We specify a system that estimates and displays cyclist durability and fatigue markers on two timescales --- acute (within-ride) and residual (training-programme) --- from three consumer signals: mechanical power, heart rate, and beat-to-beat RR intervals. No gas-exchange hardware is required. The design rests on the observation that autonomic complexity loss and cardiovascular decoupling \emph{co-vary with} (but do not directly measure) the aerobic $\dot{V}\mathrm{O_2}$ slow component, and can be inferred as latent states from how heart rate and heart-rate variability decouple from power over time. The system produces four families of output: (i) a within-ride Acute Fatigue Index (\afi) --- an index, not a measured quantity --- with a graded concern scale; (ii) live on-ride metrics on a single glance screen; (iii) a descriptive durability advisory flagging when markers indicate continued riding is mostly fatigue rather than stimulus; and (iv) start- and end-of-ride fatigue estimates connecting the residual and acute models. We are explicit about what is and is not established: the individually validated components are the observable primitives --- aerobic decoupling, chronic/acute training-load accounting, durability-drift magnitudes, and the population-level $\aone=0.75$ aerobic-threshold anchor. The fused \afi{} and the durability advisory are modelling constructs that have \emph{not} been validated against any external fatigue criterion, because no fatigue ground truth is available on the bicycle; they must be calibrated to per-athlete self-consistency and presented as advisory estimates with visible uncertainty, never as measurements. Each numeric threshold carries a provenance grade separating how confidently it was extracted from a source from how strong that source's evidence is.
+
+\vspace{0.6em}
+\noindent\textbf{Keywords:} heart-rate variability; DFA-$\alpha_1$; aerobic decoupling; durability; Kalman filter; training load; cycling; wearable sensors.
+\end{abstract}
+
+\vspace{0.5em}
+
+% ==================================================================
+\section{Introduction}\label{sec:intro}
+% ==================================================================
+
+A cyclist wants to know, in the field and afterwards: \emph{How fatigued am I right now? Is this ride still doing me good, or am I just digging a hole? How much of today's fatigue did I bring with me, and how much did I add?} These map to four concrete aims that this paper addresses in turn: (1) model fatigue on two timescales with reasonable metrics and thresholds for each; (2) present live on-ride metrics on a single glance screen; (3) estimate when a ride transitions from a productive stimulus to mainly additional fatigue; and (4) estimate fatigue at both the start and the end of a ride.
+
+The physiological point of departure is the aerobic $\dot{V}\mathrm{O_2}$ slow component: a slowly developing rise in oxygen uptake during constant-work-rate exercise above the lactate threshold, reflecting a progressive loss of contractile efficiency associated with fatigue~\cite{jones}. On a consumer device this quantity cannot be measured, but two of its correlates can: the upward drift of heart rate relative to power (aerobic decoupling), and the loss of fractal correlation in the beat-to-beat heart-rate series, quantified by the short-term detrended-fluctuation-analysis exponent $\aone$. The latter tracks the aerobic threshold at a population value of $\aone \approx 0.75$~\cite{rogers2020} and drifts downward as within-ride fatigue accumulates~\cite{rogers2022}. Our thesis is that these correlates, fused with a mechanistic prior, yield a useful --- if inherently uncertain --- estimate of accumulating fatigue.
+
+\paragraph{Design constraints.} Three constraints shape every decision. \emph{Sensors:} power (1\,Hz), heart rate (1\,Hz), and RR intervals (beat-to-beat); $\aone$ requires an RR-capable chest strap, as wrist optical heart rate is inadequate for the beat-timing precision it demands. No gas exchange, lactate, or near-infrared spectroscopy is assumed. \emph{Platform:} a wearable/head-unit environment in which a small linear Kalman filter is trivial to run at 1\,Hz, but the $\aone$ sliding-window computation (recomputed every 5\,s, not every beat) is the real compute budget. \emph{Epistemic honesty:} the fused fatigue states are not directly validated by any single study, so outputs must be presented as estimates with visible uncertainty, and the system must ship with a calibration path.
+
+% ==================================================================
+\section{System architecture}\label{sec:arch}
+% ==================================================================
+
+The system is organised as three coupled layers (\autoref{fig:arch}). \textbf{Layer~1} computes cheap, directly measured quantities --- the validated backbone. \textbf{Layer~2} fuses them into a latent acute-fatigue index that is calibrated per athlete. \textbf{Layer~3} accounts for the slow, residual fatigue that the athlete brings to a ride and carries away from it. The layers are coupled: Layer~3 seeds Layer~2's initial fatigue state (answering the start-of-ride question, \autoref{sec:startend}), and Layer~2's final state plus the ride's load updates Layer~3 (answering the end-of-ride and next-day questions).
+
+\begin{figure}[h]
+\centering
+\small
+\setlength{\fboxsep}{6pt}
+\begin{tabular}{@{}p{0.95\linewidth}@{}}
+\toprule
+\textbf{Layer 3 --- Residual fatigue (days--weeks).} Inputs: ride history (TSS/TRIMP). State: chronic/acute training load and training-stress balance, plus resting HRV. $\rightarrow$ \emph{start-of-ride fatigue state.}\\[4pt]
+\hspace{2em}$\downarrow$ \emph{seeds}\\[4pt]
+\textbf{Layer 2 --- Acute fatigue estimator (seconds).} Inputs: power, HR, RR (1\,Hz). A four-state linear Kalman filter $[\,HR_{ss},\,HR,\,\aone,\,\Fstate\,]$ with $\aone$ coupled into the drift state $\Fstate$. $\rightarrow$ \emph{Acute Fatigue Index (\afi); end-of-ride fatigue state.}\\[4pt]
+\hspace{2em}$\downarrow$ \emph{feeds}\\[4pt]
+\textbf{Layer 1 --- Observable primitives.} Inputs: power, HR, RR, cadence. Aerobic decoupling, intensity-weighted kilojoules, $\aone$, cadence drift, $W'$ balance. $\rightarrow$ \emph{durability advisory (descriptive).}\\
+\bottomrule
+\end{tabular}
+\caption{The three coupled layers. Layer~1 is the validated backbone; Layer~2 is a calibrated index; Layer~3 is standard training-load accounting.}
+\label{fig:arch}
+\end{figure}
+
+% ==================================================================
+\section{Layer 1: observable primitives}\label{sec:layer1}
+% ==================================================================
+
+These require no model and form the trustworthy backbone.
+
+\subsection{Aerobic decoupling}\label{sec:decoupling}
+We convert the retrospective first-half/second-half decoupling metric into a live signal by establishing a baseline efficiency factor $EF$ over a stable early window and reporting the running rise:
+\begin{align}
+EF &= \frac{\text{normalized power}}{\text{mean HR}}, &
+\text{Decoupling}\,(\%) &= \frac{EF_{\text{base}} - EF_{\text{win}}}{EF_{\text{base}}}\times 100,
+\label{eq:decoupling}
+\end{align}
+where normalized power is the fourth root of the 30\,s rolling mean of power$^4$, $EF_{\text{base}}$ is taken over minutes 5--15, and $EF_{\text{win}}$ over a trailing 5--10\,min window. Conventional thresholds~\cite{trainingpeaks} are ${<}5\%$ (healthy), 5--8\% (caution), and ${>}8$--10\% (above threshold or depleted); these are configurable defaults, not validated damage cut-offs.
+
+Three validity caveats apply. First, normalized power and the decoupling construct were defined and validated over whole intervals or rides ($\gtrsim 20$\,min); computing them over trailing 5--10\,min windows with coasting is an engineering adaptation that is unvalidated at that granularity and noisy on variable terrain. Second, the published thresholds come from controlled steady efforts, so a \emph{steadiness gate} is required --- decoupling is emitted only when the window's power coefficient of variation and coasting fraction are below configurable limits, and marked low-confidence otherwise. Third, at sub-threshold intensity ($\sim$75\% of functional threshold power) real-world decoupling is a low signal-to-noise channel: mean $\approx 2\%$ with standard deviation $\approx$ mean, and some riders couple negatively~\cite{barsumyan}. Small decoupling values must not be over-read.
+
+\subsection{Intensity-weighted work (the kilojoule clock)}\label{sec:kjclock}
+\begin{align}
+\text{kJ} &= \sum P\,\Delta t / 1000, &
+\text{kJ}_{\text{w}} &= \sum w(P)\,P\,\Delta t / 1000,
+\label{eq:kj}
+\end{align}
+with weight $w(P)=1$ below critical power (CP), ramping to ${\sim}2$--$3\times$ well above CP. Durability decline is driven by \emph{intensity}, not raw volume~\cite{spragg}. Person-specific warning anchors span $\sim$1500\,kJ (developing riders) to $\sim$2500\,kJ (well trained)~\cite{durabreview}, defaulted from chronic training load and refined by calibration.
+
+\subsection{DFA-$\alpha_1$}\label{sec:dfa}
+$\aone$ is computed on a 2\,min rolling RR window, recomputed every 5\,s, over box sizes 4--16 beats with per-box linear detrending, behind a hard artifact gate at 5\% (preferably ${<}3\%$)~\cite{rogers2020,rogers2022}. Both the value and a quality flag are emitted.
+
+A \emph{stationarity gate} is a first-order requirement. The short-term scaling estimate presumes local stationarity of the RR series, and essentially all of its validation was collected under controlled constant-workload or incremental-ramp laboratory conditions. Outdoors, a moving 2\,min window routinely straddles large power and cadence transients (surges, coasting, stops, cornering, drafting), violating those conditions, and field RR-artifact rates on a moving bicycle are uncharacterised in the literature. We therefore gate $\aone$ not only on artifact percentage but on within-window power/HR stationarity, suppressing or down-weighting the value when the within-window power coefficient of variation or coasting fraction exceeds a configurable threshold, and treat within-ride $\aone$ as provisional until validated on the athlete's own outdoor rides. Because $\aone$ in the 4--16-beat band is strongly shaped by respiratory sinus arrhythmia, we additionally derive respiratory frequency ($f_B$) from the same RR stream and use it to flag ventilation-driven $\aone$ movement rather than attributing it to fatigue.
+
+\subsection{Cadence drift and $W'$ balance}\label{sec:cadence}
+Second-half (or rolling) cadence decline is a corroborating fatigue signal: each 1\,rpm of decline is associated with $\approx 0.6\%$ additional decoupling~\cite{barsumyan}. $W'$-balance depletion, computed from CP and $W'$ in the differential form of Skiba et al.~\cite{skiba}, provides an additional severe-domain fatigue input.
+
+% ==================================================================
+\section{Layer 2: acute fatigue estimator}\label{sec:layer2}
+% ==================================================================
+
+A compact linear Kalman filter combines power (a clean exogenous input) with heart rate and $\aone$ (noisy, drifting observations) to estimate a latent \emph{residual cardiovascular-drift} state $\Fstate$. Architecturally it draws on the filter structure of a physiological-model extended Kalman filter for energy-expenditure estimation~\cite{pmekf} and on the level-plus-velocity heart-rate sub-model of a wearable oxygen-consumption model~\cite{labwrist}; both are preprints borrowed as starting-point structure requiring independent tuning, and neither transfers its result. The intensity-graded drift term is inspired by the gating structure of the delayed-adjustment-and-loss-of-efficiency (DALE) model of $\dot{V}\mathrm{O_2}$ kinetics~\cite{gloersen}. It is important to state what DALE does \emph{not} supply here: DALE describes a $\dot{V}\mathrm{O_2}$ phenomenon fitted to $n=8$, whereas $\Fstate$ is a heart-rate-drift phenomenon in beats per minute. No source establishes that heart-rate drift and the $\dot{V}\mathrm{O_2}$ slow component share a time course or a critical-power gate at the individual level, so DALE lends a functional form, not physiological validation.
+
+\subsection{State vector}\label{sec:state}
+\begin{equation}
+\mathbf{x} = [\,HR_{ss},\; HR,\; \aone,\; \Fstate\,]^{\!\top}
+\label{eq:state}
+\end{equation}
+where $HR_{ss}$ is the quasi-steady heart rate the current power would elicit when fresh; $HR$ is the latent actual heart rate; $\aone$ is the latent DFA-$\alpha_1$; and $\Fstate$ is the residual cardiovascular-drift state --- the upward heart-rate drift at fixed power that the static power$\rightarrow$HR term cannot explain (bpm; zero when fresh). Crucially, $\Fstate$ is \emph{not} the $\dot{V}\mathrm{O_2}$ slow component. It is a catch-all residual that absorbs everything lifting heart rate at fixed power --- thermoregulatory and plasma-volume drift, dehydration, glycogen state, caffeine, altitude, emotional load --- \emph{and} any metabolic efficiency loss. It co-varies with the slow component but does not measure it.
+
+\subsection{Transition and observation equations}\label{sec:transitions}
+With $\Delta t = 1$\,s and first-order forms discretised,
+\begin{align}
+HR_{ss}(k) &= HR_{\text{rest}} + g_P\,P(k), \label{eq:hrss}\\
+HR(k{+}1) &= HR(k) + \tfrac{\Delta t}{\tau_{HR}}\big(HR_{ss}(k) + \Fstate(k) - HR(k)\big) + w_{HR}, \label{eq:hr}\\
+\aone(k{+}1) &= \aone(k) + \tfrac{\Delta t}{\tau_{\alpha}}\big(\aone^{\text{tgt}}(P(k)) - c_F\,\Fstate(k) - \aone(k)\big) + w_{\alpha}, \label{eq:a1}\\
+\Fstate(k{+}1) &= \Fstate(k) + \big[\kappa_i\,\max(0,\,P(k)-P_{\text{AeT}}) + \kappa_d\big]\Delta t - \tfrac{\Fstate(k)}{\tau_{\text{rec}}}\Delta t + w_{F}, \label{eq:F}
+\end{align}
+with the power$\rightarrow$$\aone$ map a falling sigmoid crossing 0.75 at aerobic-threshold power,
+\begin{equation}
+\aone^{\text{tgt}}(P) = a_0 - \frac{a_1}{1 + \exp\!\big(-s\,(P - P_{\text{AeT}})\big)},
+\label{eq:sigmoid}
+\end{equation}
+and linear observations
+\begin{align}
+HR_{\text{meas}}(k) &= HR(k) + v_{HR}, &
+\aone^{\text{meas}}(k) &= \aone(k) + v_{\alpha}.
+\label{eq:obs}
+\end{align}
+
+The coupling term $-c_F\,\Fstate$ in \autoref{eq:a1} is the fusion mechanism: fatigue pulls latent $\aone$ below the value power alone predicts, so when the measured $\aone$ drifts below $\aone^{\text{tgt}}(P)$ the innovation loads onto $\Fstate$. Without this term, $\aone$ measurements would contribute no information to the fatigue estimate. The charge term in \autoref{eq:F} has a graded \emph{intensity} component $\kappa_i\max(0,P-P_{\text{AeT}})$, rising above the aerobic threshold rather than switching hard at CP, plus a small \emph{duration} component $\kappa_d$ that admits slow thermal drift at low intensity; $\kappa_d$ charges only while active (pedalling, or heart rate above rest), so $\Fstate$ relaxes during recovery, coasting, and stops. Recovery is first-order with time constant $\tau_{\text{rec}}$. The two anchors are deliberate: drift onsets at the aerobic threshold $P_{\text{AeT}}$ (heavy domain), whereas the severe-domain constructs (kilojoule weighting, $W'$ balance, and the effort characteriser of \autoref{sec:featattr}) gate at CP.
+
+This system is \emph{linear in the state}. The only nonlinearities --- $\aone^{\text{tgt}}(P)$, the hinge $\max(0,P-P_{\text{AeT}})$, and $g_P P$ --- are functions of the measured input $P$ and enter as known additive input terms; the coupling and recovery terms are linear in the state, and both observations are linear. A standard linear (time-varying) Kalman filter is therefore exactly optimal under Gaussian noise. An extended filter would be required only if a sigmoid parameter or $P_{\text{AeT}}$ were promoted to an estimated state, which is not the case here, and it would waste compute on a Jacobian that reduces to the constant transition matrix.
+
+\subsection{Observability}\label{sec:observability}
+$HR_{ss}=HR_{\text{rest}}+g_P P$ and $\Fstate$ are both additive on heart rate, so on constant-power rides --- the exact regime durability monitoring targets --- $\Fstate$ is weakly observable from heart rate alone: it is confounded with any error in the static gain $g_P$, with drift in $HR_{\text{rest}}$, and with thermal drift. The $\aone$ coupling rescues partial observability, but $\aone$ is slow, high-variance, and of contested directionality once fatigued, so it only partly separates fatigue drift from gain and thermal drift. Consequently, on a steady ride \afi{} is effectively a prior-dominated time-ramp (set by the hand-tuned charge $\kappa$) weakly corrected by two correlated channels --- closer to smoothed decoupling with a physiological prior than to an independent measurement --- and the filter must not be read as adding precision the sensors do not contain. Because $\aone$ now couples into $\Fstate$, a respiration- or artifact-driven $\aone$ excursion can masquerade as fatigue; this is why the $\aone$ measurement noise is inflated on rapid-$f_B$ or high-artifact windows (\autoref{sec:tuning}). Implementations should include a mathematical observability/conditioning check (is $\Fstate$ recoverable, via a non-degenerate observability Gramian, from realistic variable-power profiles and noise?). Such a check proves numerical recoverability under the assumed model only; it is not physiological identifiability, which requires an external criterion study (\autoref{sec:validation}).
+
+\subsection{Seed and tuning values}\label{sec:tuning}
+\autoref{tab:tuning} lists starting values; all are overridable and calibrated per athlete. Several parameters --- $Q$, $R$, $\tau_{\text{rec}}$, $c_F$, and the $\kappa$ terms --- have no on-bicycle ground truth and are hand-set. A filter with hand-set covariances and a weakly observable state is a smoother with a physiological costume until calibration demonstrates otherwise. Moreover, the heart-rate and $\aone$ innovations share physiological drivers (heat, respiration), so the diagonal-$R$ assumption is optimistic and the filter's implied \afi{} precision is a lower bound on uncertainty; $R$ should be inflated (or made non-diagonal) to compensate. The coupling gain $c_F$ is an unvalidatable cross-signal exchange rate (``$F_{\text{ref}}$ bpm $\Leftrightarrow \sim0.2$ of $\aone$'') that itself depends on the hand-set $F_{\text{ref}}$ and on the non-universal sigmoid; a value of $\sim0.45$ has been observed for the $\aone$ fall at task failure in cycling~\cite{rogers2025}, so the 0.2 anchor may be low by roughly a factor of two and warrants sensitivity analysis. Heat is handled coherently: because $\Fstate$ is cardiovascular drift, it legitimately includes thermal drift, so a hot-day \afi{} rise is correct, and the advisory of \autoref{sec:advisory} names heat as a co-driver rather than discounting it.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Seed and tuning values for the acute filter. Hand-set constants have no on-bicycle ground truth and must be calibrated per athlete.}
+\label{tab:tuning}
+\begin{tabularx}{\linewidth}{@{}l l X@{}}
+\toprule
+\textbf{Parameter} & \textbf{Start value} & \textbf{Basis} \\
+\midrule
+$\tau_{HR}$ & 30\,s & heart-rate kinetics \\
+$\tau_{\alpha}$ & 90\,s & $\aone$ responds slowly \\
+$\tau_{\text{rec}}$ & 900\,s & within-ride partial recovery (hand-set) \\
+$g_P$ & $\approx (HR_{\max}-HR_{\text{rest}})/P_{\max}\approx 0.15$\,bpm/W & static gain \\
+$P_{\text{AeT}}$, CP & from athlete ($P_{\text{AeT}}\approx 0.75\,$FTP) & profile; a stale value propagates downstream \\
+$a_0,a_1,s$ & $1.1,\;0.6,\;0.02\,\text{W}^{-1}$ & sigmoid through $\aone=0.75$ at $P_{\text{AeT}}$ \\
+$\kappa_i$ & 30\,min at $P_{\text{AeT}}{+}80$\,W lifts $\Fstate\approx 8$--10\,bpm & intensity charge \\
+$\kappa_d$ & $\Fstate$ rises $\sim$2--3\,bpm over 2\,h at low intensity & duration/thermal charge \\
+$c_F$ & $\Fstate\approx F_{\text{ref}}$ pulls $\aone$ $\sim$0.2 below predicted & coupling gain (hand-set) \\
+$Q$ & $\mathrm{diag}(0.5,0.5,0.002,0.05)$ & process noise (hand-set) \\
+$R$ & $\mathrm{diag}(\sigma_{HR}^2,\sigma_{\alpha}^2),\;\sigma_{HR}{=}2,\;\sigma_{\alpha}{=}0.15$ & measurement noise (hand-set) \\
+$P_0$ & $\mathrm{diag}(25,25,0.09,4)$ & wide initialisation \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The sigmoid $\aone^{\text{tgt}}$ encodes a power$\rightarrow$$\aone$ relationship that is not universal: only $\sim$44\% of individual rides reach a usable correlation~\cite{powera1}. Cold-start defaults therefore misfit a substantial minority of riders; when per-athlete calibration fails an $R^2>0.75$ acceptance gate, the system falls back to decoupling-only with $\aone$ shown for information only. Finally, the $\aone$ measurement noise $R_\alpha$ is inflated when $f_B$ changes rapidly or artifact is elevated, so that respiration- and artifact-driven $\aone$ excursions contribute little to $\Fstate$ --- the $f_B$ mitigation of \autoref{sec:dfa} is wired into the filter, not merely displayed.
+
+\subsection{The Acute Fatigue Index}\label{sec:afi}
+A single 0--100 index is defined from the drift state, normalised to the athlete:
+\begin{equation}
+\afi = 100\cdot\mathrm{clamp}\!\left(\frac{\Fstate}{F_{\text{ref}}},\,0,\,1\right),
+\label{eq:afi}
+\end{equation}
+with $F_{\text{ref}}$ the athlete's typical end-of-hard-ride drift (default $\sim$12\,bpm). Because \afi{} is linear in $1/F_{\text{ref}}$, this single unvalidated constant sets the entire scale; its sensitivity must be surfaced, and \afi{} must be labelled an index, never a measured fatigue quantity. \afi{} has not been validated against any external fatigue criterion.
+
+\afi{} is blended with model-free decoupling as a graceful-degradation fallback, not an independent corroboration (on steady rides the two are near-identical). Keeping the scale reference-consistent so that the start and current markers remain comparable across RR-quality transitions:
+\begin{align}
+w_{rr} &= \mathrm{clamp}\!\left(\frac{\text{art}_{\max}-\text{art}}{\text{art}_{\max}-\text{art}_{\text{good}}},\,0,\,1\right), &
+\afi_{\text{dec}} &= 100\cdot\mathrm{clamp}\!\left(\frac{\text{Decoupling}\%}{\text{dec}_{\text{ref}}},\,0,\,1\right),\\
+\afi &= w_{rr}\,\afi_{\text{KF}} + (1-w_{rr})\,\afi_{\text{dec}},
+\label{eq:blend}
+\end{align}
+where $\text{dec}_{\text{ref}}$ is chosen so both sources map to the same $F_{\text{ref}}$-equivalent reference. The hand-over is continuous in $w_{rr}$, and the display marks the moment the dominant source switches so the history stays interpretable.
+
+The graded concern scale is given in \autoref{tab:bands}. Verdict gating uses per-athlete drift (both $\aone$ and \afi{} relative to their own rolling baseline-for-power). The fixed $\afi>85$ cut-off is itself an $F_{\text{ref}}$-dependent absolute threshold in disguise --- ``$\afi>85$'' is just ``$\Fstate>0.85\,F_{\text{ref}}$'' --- so it is treated as a convention-grade default that must be calibrated, and the band also fires on \afi{} drifting above the athlete's own rolling baseline. The absolute $\aone$ value is shown for information but does not gate any verdict: the earlier ``$\aone<0.5=$ severe'' notion was anchored on a running-derived collapse magnitude that the only cycling durability study contradicts~\cite{rogers2025}, in which athletes drifted only to $\sim$0.75 at task failure and not all reached anticorrelated values even at failure.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Graded concern scale (configurable defaults). Gating relies on per-athlete drift; absolute cut-offs are convention-grade.}
+\label{tab:bands}
+\begin{tabularx}{\linewidth}{@{}l X l@{}}
+\toprule
+\textbf{Signal} & \textbf{State} & \textbf{Basis} \\
+\midrule
+$\afi<30$, decoupling ${<}5\%$, $\aone>0.75$ & Fresh / productive aerobic & decoupling convention; $\aone$ anchor \\
+$\afi\,30$--60, decoupling 5--8\% & Accumulating, still productive & decoupling convention \\
+$\afi\,60$--85 or above own baseline; $\aone\gtrsim 0.2$ below baseline-for-power & High fatigue; durability fading & per-athlete drift \\
+$\afi>85$ or well above own baseline; $\aone\gtrsim 0.3$ below baseline-for-power & Severe; markers indicate window closing & per-athlete drift \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% ==================================================================
+\section{Layer 3: residual training-scale fatigue}\label{sec:layer3}
+% ==================================================================
+
+Standard, well-behaved bookkeeping tracks the residual load an athlete carries between rides~\cite{trainingpeaks}. Daily training stress is $\text{TSS} = (\text{s}\cdot NP\cdot IF)/(\text{FTP}\cdot 3600)\times 100$ (or a heart-rate training impulse~\cite{banister} when no power is available), and chronic load (CTL), acute load (ATL), and training-stress balance (TSB) follow exponentially weighted moving averages:
+\begin{align}
+\text{CTL} &= \text{CTL}_y + \tfrac{1}{42}\,(\text{TSS}-\text{CTL}_y), &
+\text{ATL} &= \text{ATL}_y + \tfrac{1}{7}\,(\text{TSS}-\text{ATL}_y), &
+\text{TSB} &= \text{CTL}_y - \text{ATL}_y.
+\label{eq:ctl}
+\end{align}
+The residual-fatigue readout is ATL and TSB, with configurable bands ($>{+}10$ fresh; $-10$ to $-30$ productive overload; ${<}-30$ high overreaching risk). If resting RR is captured, RMSSD is tracked against a personal 7-day rolling baseline $\pm1$\,SD rather than any universal cut-off~\cite{rmssd}, with the caveat that direction alone can mislead, since some overreached athletes show transient HRV elevation~\cite{meeusen}.
+
+The acute:chronic workload ratio is offered opt-in and off by default. It is mathematically criticised for coupling artifacts and ecological fallacy~\cite{lolli,impellizzeri}, and no randomised trial shows that acting on it reduces injury; where shown it is a plain weekly load-ramp display, not a risk score, and a chronic-load ramp of ${>}5$--8 points per week is the simpler, less-contested over-reach cue. For a well-trained cyclist, typical values are CTL 70--150, a hard 3\,h ride of 200--300 TSS, and TSB routinely $-10$ to $-30$ during a build block.
+
+% ==================================================================
+\section{The durability advisory}\label{sec:advisory}
+% ==================================================================
+
+No validated marker exists for the exact moment a ride turns net-negative, and in cycling ``damage'' is mostly glycogen depletion rather than muscle injury. This is the most user-facing capability and simultaneously the least validated. The system therefore emits a \emph{descriptive} durability advisory, not an imperative alarm, drawing on corroboration among correlated Layer-1 markers: (i) intensity-weighted kilojoules approaching the durability anchor; (ii) decoupling drift above the athlete's own early-ride baseline, after the steadiness gate and $\geq 60$--90\,min; and (iii) $\aone$ drift below the athlete's baseline-for-power.
+
+These markers are not independent. Decoupling and the $\aone$/$\Fstate$ drift are two windows onto the same cardiac/autonomic process; the kilojoule clock is a deterministic function of time-on-task, the very axis along which the other two accumulate; and shared, unmeasured confounds (heat, dehydration, under-fuelling, altitude) move several at once. We therefore do not describe the markers as independent; heat is named as a co-driver of the drift rather than discounted (keeping the advisory coherent with the \afi{} dial, since $\Fstate$ legitimately includes thermal drift); and the message is descriptive --- ``durability markers are drifting; remaining work may be mostly fatigue'' --- never an imperative, because a directive verb communicates a certainty the evidence cannot support. On variable-power outdoor rides the stationarity gate frequently suppresses $\aone$, so the advisory routinely reduces to decoupling drift plus the kilojoule clock --- effectively one informative channel past a time threshold rather than multi-marker agreement --- and it must say so and be weighted accordingly. The underlying durability physics is nonetheless sound: the aerobic boundary drifts down $\sim$6--10\% after $\sim$1400--1680\,kJ~\cite{maunder,stevens}, and this drift correlates with high-end power loss ($r_s=0.72$)~\cite{vt15min}. Any ``damage point'' or glycogen threshold is treated as speculative.
+
+Not all red is a signal to stop. High fatigue produced by a deliberate hard effort --- a climb, a breakaway, a threshold block --- is the intended stimulus, not a warning (\autoref{sec:featattr}). Because the effort characteriser is itself unvalidated, it contextualises the advisory and is shown as raw evidence, but never gates or suppresses it.
+
+% ==================================================================
+\section{Start- and end-of-ride fatigue}\label{sec:startend}
+% ==================================================================
+
+\textbf{Start-of-ride} fatigue is the Layer-3 state at ride start. The seeding map $\Fstate(0)=f(\text{ATL},\text{TSB},\text{RMSSD}_{\text{dev}})$ converts a days-scale residual-load state into ``bpm of pre-existing drift'' --- a cross-domain mapping with no citation basis. A concrete default is
+\begin{equation}
+\Fstate(0) = F_{\text{ref}}\cdot\mathrm{clamp}\!\Big(a\,\tfrac{\max(0,-\text{TSB})}{\text{TSB}_{\text{scale}}} + b\,\max(0,-\text{RMSSD}_z),\;0,\;0.6\Big),
+\label{eq:seed}
+\end{equation}
+so that a rider deep in negative TSB with suppressed RMSSD starts partly fatigued. Because $f(\cdot)$ is unvalidated, start-of-ride fatigue is presented as a coarse bucket --- fresh, moderately loaded, or heavily loaded --- not a point value.
+
+\textbf{End-of-ride} fatigue is the Layer-2 final $\Fstate$/\afi{} plus the ride's TSS folded into ATL and CTL. The difference (end minus start) is the fatigue added. Because it is a difference of two soft, weakly observable estimates, it is reported as a bucketed range with an uncertainty band rather than a precise number; presenting ``fatigue added today'' to the point would reintroduce exactly the over-precision the rest of the design avoids. The arithmetic is at least dimensionally consistent, since both endpoints are the same $\Fstate$ state in bpm.
+
+% ==================================================================
+\section{Display, effort characterisation, and storage}\label{sec:display}
+% ==================================================================
+
+\subsection{The single glance screen}\label{sec:glance}
+This is not a constantly watched field. It is a large, full-screen layout the rider consults a handful of times per ride for a keep-going or ease-off read. It leads with a descriptive status, backed by evidence, readable in a two-second glance. To keep interface confidence matched to evidence confidence, the status band is descriptive rather than imperative, carries a persistent ``advisory --- not a validated measurement'' tag whenever it reflects the fused \afi{} or advisory, and the raw evidence row is given at least equal visual weight, since the primitives are the validated part.
+
+The layout, top to bottom, is: (1) a \textbf{status band} in descriptive states --- \textsc{fresh/productive} (green), \textsc{fatigue building} (amber), \textsc{durability markers drifting} (red) --- with, when red, a second line naming the kind of red (Feat of Strength or Attrition) as characterisation, not a command; (2) an \textbf{acute-fatigue dial}; (3) an \textbf{evidence row} (rolling decoupling, $\aone$ with a data-quality dot, intensity-weighted kilojoules versus the durability anchor, and $W'$ matches burned); (4) a \textbf{feats strip} (best efforts, matches burned, and residual context); and (5) a \textbf{data-quality footer} (RR artifact percentage and $\aone$ validity, with the decoupling-only fallback surfaced when RR is poor). Colour is always reinforced with text or icon, never colour alone, for colour-blind riders and glance speed.
+
+A recorded design decision governs the dial. A number on a dial reads as a measurement regardless of surrounding tags, and a weakly observable, prior-dominated, externally unvalidated fatigue number should not be presented as one. \emph{The precise 0--100 \afi{} digit, the point-value start/current/end figures, and any projected-end tick are gated on a positive external criterion study} (\autoref{sec:validation}). Pre-study, the dial shows only the three-state green/amber/red categorical plus coarse start and current positions; the Feat/Attrition characterisation and the validated backbone (decoupling, kilojoules versus anchor, CTL/ATL/TSB, the population $\aone$ anchor) remain fully available. Shipping the numeric \afi{} earlier is a legitimate product choice but must be recorded as an explicit exception to this decision.
+
+\subsection{Characterising red: Feat of Strength versus Attrition}\label{sec:featattr}
+Going deep into the red is frequently the point. The system classifies the driver of high fatigue along one axis: is the fatigue being bought with output? \emph{Feat of Strength} is high fatigue with high output --- power well above CP, time in the severe domain, $W'$ depletions (``matches''), and in-ride best efforts --- rendered as intended stimulus, not a warning. \emph{Attrition} is high fatigue with declining or merely maintained output --- rising decoupling and $\aone$ drift at sub-threshold power, deep past the durability anchor --- the genuine ease-off case. Two scores summarise this:
+\begin{align}
+\text{FeatScore} &\propto \text{kJ}_{>\text{CP}} + w_{\text{sev}}\,t_{\text{severe}} + \textstyle\sum(\text{match depth}) + \text{best-effort bonuses},\\
+\text{AttritionScore} &\propto (\text{decoupling above baseline})\cdot t_{\text{sub-threshold, past anchor}} + (\aone\ \text{drift below baseline}),
+\label{eq:scores}
+\end{align}
+where a $W'$ ``match'' is a $W'$-balance depletion below a low threshold followed by partial recovery~\cite{skiba}. This classifier has arbitrary weights, no labelled training data, no ground-truth class definition, and no measured error rate; it therefore does not gate the headline status. The two scores are shown as raw evidence to contextualise a red state, and the underlying $W'$-balance chain depends on a possibly stale CP/$W'$, which is surfaced as a data-quality caveat.
+
+\subsection{Data storage and session results}\label{sec:storage}
+Two tiers persist the markers through the ride and roll them up for cross-ride comparison. \emph{In-ride time series} are logged (1\,Hz, or 5\,s for $\aone$) as developer fields --- \afi{}, $\Fstate$, decoupling, $\aone$, $W'$ balance, intensity-weighted kilojoules, and the two effort scores --- so they flow into the activity file for post-ride charting. A \emph{session summary} persists a compact record for cross-ride comparison: date, duration, TSS, start/end/added fatigue, peak \afi{}, time-in-red split into Feat versus Attrition minutes, FeatScore with top feats, AttritionScore, durability anchor reached, and updated CTL/ATL/TSB, with a rolling history retained. A post-ride comparison view lets the rider see whether hard days are bought with performance or paid for with drift.
+
+\subsection{Sensor availability and graceful degradation}\label{sec:degradation}
+No single sensor failure may inhibit the calculation or display of anything that does not depend on it. Every metric declares its input dependencies and is computed in a fault-isolated unit that returns a value plus an availability/quality state --- never throwing into the shared loop, never yielding non-finite values. The view renders every tile from its own availability, so a missing input greys out only its dependent tiles (with an explicit ``no-sensor'' marker) while all independent tiles keep updating. \autoref{tab:degradation} summarises the behaviour.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Graceful-degradation matrix. Each missing input degrades only its dependents; everything else keeps updating.}
+\label{tab:degradation}
+\begin{tabularx}{\linewidth}{@{}l X X@{}}
+\toprule
+\textbf{Missing / bad input} & \textbf{Degrades} & \textbf{Keeps working (fallback)} \\
+\midrule
+Power & decoupling, kJ, $W'$ balance, FeatScore, power-TSS & HR, $\aone$, RMSSD, cadence; switch load to HR-TRIMP \\
+Heart rate & \afi{}/$\Fstate$, decoupling, HR-TRIMP & power, kJ, $W'$ balance, power-TSS; \afi{} shows ``---'' \\
+RR / poor RR & $\aone$, RMSSD, $f_B$ & filter drops $\aone$ update (HR-only); \afi{} blends decoupling-dominant \\
+Cadence & cadence-drift corroborator & everything else unaffected \\
+Stale FTP/CP & $W'$ balance, FeatScore, kJ-weighting, $P_{\text{AeT}}$ & compute with last-known, flag low-confidence \\
+Intermittent dropout & the affected tile only & hold last-valid with staleness timer, then mark unavailable \\
+Total sensor loss & most computed tiles & layout still renders with ``unavailable'' markers \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The linear filter handles a missing measurement natively: skip that observation's update and run predict-only, or update on the channels present. A lost RR stream yields a heart-rate-only update; a lost heart rate yields a predict-only step in which $\Fstate$ coasts on its prior, flagged low-confidence, until heart rate returns. Covariance grows during predict-only gaps, which correctly widens the displayed uncertainty rather than freezing a stale but confident value. Every sensor read and calculator is wrapped in guards so that no exception escapes the compute loop, every output is represented as a value/availability/quality triple, and the glance screen remains fully functional with any subset of sensors present --- degrading in information content but never in stability.
+
+% ==================================================================
+\section{Provenance and evidence grading}\label{sec:provenance}
+% ==================================================================
+
+Every numeric threshold is graded on two orthogonal axes (\autoref{tab:provenance}). \emph{Extraction confidence} is how sure we are the number was read correctly from its source; \emph{evidence strength} is how strong the underlying science is (sample size, independent replication, generalisability, individual-level error). A number can be extracted with perfect fidelity from a small, single-group, laboratory study --- high extraction confidence, weak evidence. One caveat pervades the table: the $\aone$ evidence base is dominated by a single overlapping research group, so consistency across several papers reflects methodological consistency, not independent replication.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Provenance of the principal numeric thresholds. ``Synth.'' denotes a modelling construct rather than a measured value.}
+\label{tab:provenance}
+\begin{tabularx}{\linewidth}{@{}l l X@{}}
+\toprule
+\textbf{Threshold} & \textbf{Extraction} & \textbf{Evidence strength} \\
+\midrule
+$\aone=0.75$ (aerobic threshold) & High & Good group-level agreement, but $\pm10$\,bpm individual limits of agreement; $n=15$, single group, lab \\
+$\aone=0.5$ (anaerobic threshold) & High & Weak (HR $r\approx0.71$); not for band boundaries \\
+Per-athlete $\aone$ drift as fatigue flag & High & Synth.; within-ride use rests on 3 small studies ($n\approx28$, mostly running) \\
+Decoupling 5 / 8 / 10\% bands & High & Coaching convention; steady-effort validity; low SNR sub-threshold \\
+$\sim$0.6\% decoupling per rpm cadence decline & High & Correlational, $r\approx0.4$, $n=17$ male; no threshold established \\
+Durability $-6$ to $-10\%$ after $\sim$1400--1680\,kJ & High & Validated; small trained samples \\
+kJ anchors 1500 / 2500 & High & Population-level; extrapolation to recreational riders \\
+CTL/ATL/TSB, TSS formula & High & Standard; modest predictive validity \\
+Durability prediction $R^2=0.95$~\cite{rothschild} & High & In-sample, 5 predictors, $n=51$; not out-of-sample \\
+TSB bands & High & Coaching convention; not peer-reviewed \\
+ACWR sweet spot / danger zones & High & Contested; opt-in, descriptive only \\
+DALE $\tau_{st}\approx28$\,s, $\tau_{ft}\approx47$\,s & High & Validated for $\dot{V}\mathrm{O_2}$ only ($n=8$); does not transfer to $\Fstate$ \\
+Kalman seeds, $\kappa$, $\tau_{\text{rec}}$, $Q$, $R$ & --- & Synth./hand-set; $\Fstate$ weakly observable at constant power \\
+$c_F$ coupling gain & --- & Synth.; unvalidatable cross-signal exchange rate \\
+$\afi>85$ / band positions & --- & Convention, $F_{\text{ref}}$-dependent; must be calibrated \\
+Projected end-of-ride tick & --- & Synth.; forecast on hand-set constants; gated \\
+$f(\cdot)$ start-of-ride seeding & --- & Synth.; cross-domain map \\
+Power$\rightarrow$$\aone$ sigmoid & High & Not universal ($\sim$44\% of rides usable); calibrate per athlete \\
+Feat/Attrition characterisation & --- & Synth.; arbitrary weights; off the advisory critical path \\
+$W'$ ``match'' definition & High & Established; depends on a good CP/$W'$ \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% ==================================================================
+\section{Calibration and validation}\label{sec:validation}
+% ==================================================================
+
+There is no fatigue gold standard available on the bicycle --- that absence is the premise of the project. The calibration steps below therefore tune the model to internal self-consistency and to measured threshold crossings; they cannot validate the latent $\Fstate$/\afi{} against measured fatigue, because none exists on-device.
+
+\paragraph{Calibration.} (1) Cold start from the athlete profile (FTP/CP, $HR_{\max}$/$HR_{\text{rest}}$, sex, CTL) to literature defaults, labelled ``uncalibrated --- estimate only.'' (2) A threshold-calibration ride (ramp or step protocol) fits the personal power$\rightarrow$$\aone$ sigmoid --- accepted only if $R^2>0.75$, otherwise decoupling-only with $\aone$ display-only --- and the personal aerobic/anaerobic threshold powers. (3) A durability calibration (one or two long rides) fits the personal kilojoule anchor and the $\kappa$ terms against observed VT1/decoupling drift. (4) Ongoing: nightly RMSSD baseline and periodic re-fitting as CTL changes.
+
+\paragraph{Criterion-validity study.} Because \afi{}/$\Fstate$ is currently checked only against the model's own priors, it is, until this study is done, unfalsifiable, and it is the release gate for the numeric \afi{} (\autoref{sec:glance}). The study must relate \afi{}/$\Fstate$ to an external fatigue readout --- sustained-power decrement (end-ride versus fresh 5\,min power), blood-lactate kinetics, time-anchored ratings of perceived exertion, or a next-day readiness marker. The correct statistics are a calibration/association analysis (rank correlation and a fitted calibration curve with cross-validated error), \emph{not} Bland--Altman agreement, which is invalid across mismatched units and constructs (an index versus watts, mmol, or RPE points). A small (e.g.\ $n\approx5$) per-athlete pilot is proof-of-concept only and cannot establish agreement limits; a properly powered study is required before any ``validated'' claim, and it should include a sensitivity analysis on $c_F$, $F_{\text{ref}}$, and $\kappa$.
+
+\paragraph{Consistency checking.} An automated harness can verify that the implementation is internally consistent with the specified model (e.g.\ $\text{TSB}=\text{CTL}-\text{ATL}$ exactly; \afi{} bounded; bands ordered; ensemble-mean directional plausibility with wide tolerance). This is regression protection, not external validity: passing it shows only that the code matches the specification, not that the model matches reality.
+
+% ==================================================================
+\section{Limitations}\label{sec:limitations}
+% ==================================================================
+
+\begin{itemize}
+\item \textbf{Aggregate fragility.} The system rests on a stack of small studies --- $n=8$ for the kinetics model, $n=15$ for the $\aone$ anchor, $n=10$ for cycling durability~\cite{rogers2025}, $n=7$ and $n=11$ for running fatigue~\cite{ultra,marathon}, and $n\approx9$--10 for the borrowed filter --- nearly all with $n<20$, predominantly male, and, for the within-ride $\aone$ use, partly from running. Small-sample effect sizes are upward-biased; every anchor should be treated as provisional.
+\item \textbf{External-validity gap.} Essentially all $\aone$ validation is laboratory, constant-workload, chest-strap, low-artifact. The system runs outdoors on variable power, where a moving 2\,min window straddles transients and field artifact rates are uncharacterised. Within-ride $\aone$ must be validated on the athlete's own outdoor rides; the stationarity gate is mandatory.
+\item \textbf{The fused states are not externally validated.} \afi{}/$\Fstate$ is an index, not a measured quantity; there is no on-bicycle ground truth, and $\Fstate$ is weakly observable at constant power.
+\item \textbf{RR quality is the dominant failure mode.} A chest strap is required; artifact above 5\% invalidates $\aone$.
+\item \textbf{Sex generalisability is unestablished.} The foundational threshold work is overwhelmingly male, and menstrual-cycle effects on $\aone$ are largely unstudied. Collecting sex as a setting does not make the bands sex-adjusted.
+\item \textbf{Confounders are disclosed but mostly unmodelled.} Heat, dehydration, altitude, breathing, nutrition, illness, and menstrual cycle all move the signals; only heat is partly handled.
+\item \textbf{Cycling is not running.} The durability and low-muscle-damage findings are cycling-appropriate; running muscle-damage and $\aone$-collapse magnitudes must not be imported.
+\item \textbf{Not a medical device.} It does not diagnose overtraining syndrome.
+\end{itemize}
+
+% ==================================================================
+\section{Conclusion}\label{sec:conclusion}
+% ==================================================================
+
+FatigueMeter composes established work on the $\dot{V}\mathrm{O_2}$ slow component, DFA-$\alpha_1$, aerobic decoupling, and training load into a device-feasible durability/decoupling dashboard with a per-athlete-calibrated advisory. Its validated backbone is the observable primitives; its novel layer --- the fused \afi{}, the $\aone$-coupled linear-Kalman drift state, the durability advisory, and the effort characterisation --- is inspired by, not derived from, the kinetics and filtering literature, is weakly observable on steady rides, and has not been validated against any external fatigue criterion. The distinctive discipline of the design is provenance: every number is traceable, extraction confidence is separated from evidence strength, and interface confidence is matched to evidence confidence through descriptive advisories, persistent uncertainty labels, and the gating of the numeric index on an external study. What remains between an advisory and an instrument is a single, correctly designed criterion study.
+
+% ==================================================================
+\begin{thebibliography}{99}
+\setlength{\itemsep}{2pt}
+
+\bibitem{jones} Jones AM, Grassi B, Christensen PM, Krustrup P, Bangsbo J, Poole DC. Slow component of $\dot{V}\mathrm{O_2}$ kinetics: mechanistic bases and practical applications. Med Sci Sports Exerc. 2011;43(11):2046--62. Available from: \href{https://www.researchgate.net/publication/51107457}{researchgate.net/publication/51107457}.
+
+\bibitem{rogers2020} Rogers B, Giles D, Draper N, Hoos O, Gronwald T. A new detection method defining the aerobic threshold for endurance exercise and training prescription based on fractal correlation properties of heart rate variability. Front Physiol. 2020;11:596567. Available from: \href{https://www.frontiersin.org/articles/10.3389/fphys.2020.596567/full}{doi:10.3389/fphys.2020.596567}.
+
+\bibitem{rogers2022} Rogers B, Gronwald T. Fractal correlation properties of heart rate variability as a biomarker for training-intensity distribution and prescription: an update. Front Physiol. 2022;13:879071. Available from: \href{https://www.frontiersin.org/articles/10.3389/fphys.2022.879071/full}{doi:10.3389/fphys.2022.879071}.
+
+\bibitem{gloersen} Gløersen Ø, Colosio AL, Boone J, Dysthe DK, Malthe-Sørenssen A, Capelli C, Pogliaghi S. Modeling $\dot{V}\mathrm{O_2}$ on-kinetics based on intensity-dependent delayed adjustment and loss of efficiency (DALE). J Appl Physiol. 2022;132(4):1006--18. Available from: \href{https://journals.physiology.org/doi/full/10.1152/japplphysiol.00570.2021}{doi:10.1152/japplphysiol.00570.2021}.
+
+\bibitem{skiba} Skiba PF, Chidnok W, Vanhatalo A, Jones AM. Modeling the expenditure and reconstitution of work capacity above critical power. Med Sci Sports Exerc. 2012;44(8):1526--32. Available from: \href{https://doi.org/10.1249/MSS.0b013e3182517a80}{doi:10.1249/MSS.0b013e3182517a80}.
+
+\bibitem{maunder} Maunder E, Seiler S, Mildenhall MJ, Kilding AE, Plews DJ. The importance of ``durability'' in the physiological profiling of endurance athletes. Sports Med. 2021;51(8):1619--28. Available from: \href{https://link.springer.com/article/10.1007/s40279-021-01459-0}{doi:10.1007/s40279-021-01459-0}.
+
+\bibitem{trainingpeaks} TrainingPeaks. The science of the Performance Manager [Internet]. Available from: \href{https://www.trainingpeaks.com/learn/articles/the-science-of-the-performance-manager/}{trainingpeaks.com}.
+
+\bibitem{barsumyan} Barsumyan A, Soost C, Graw JA, Burchard R. The relationship between cadence decline, cardiovascular drift and aerobic decoupling as a marker of fatigue in well trained cyclists. BMC Sports Sci Med Rehabil. 2026;18(1). Available from: \href{https://doi.org/10.1186/s13102-026-01678-w}{doi:10.1186/s13102-026-01678-w}.
+
+\bibitem{spragg} Spragg J, Leo P, Swart J. The intensity, not the volume, of prior work determines the deterioration of the power--duration relationship in professional cyclists. Eur J Appl Physiol. 2024. Available from: \href{https://pmc.ncbi.nlm.nih.gov/articles/PMC11235642/}{PMC11235642}.
+
+\bibitem{durabreview} Durability in endurance cycling: a systematic review of physiological deterioration during prolonged exercise. Eur J Appl Physiol. 2025. Available from: \href{https://link.springer.com/article/10.1007/s00421-025-05885-0}{doi:10.1007/s00421-025-05885-0}.
+
+\bibitem{pmekf} PM-EKF: a physiological model-based extended Kalman filter for daily-life physical-activity energy-expenditure estimation [preprint]. arXiv:2604.26803. Available from: \href{https://arxiv.org/abs/2604.26803}{arxiv.org/abs/2604.26803}.
+
+\bibitem{labwrist} From lab to wrist: bridging metabolic monitoring and consumer wearables for heart rate and oxygen-consumption modeling [preprint]. arXiv:2505.00101. Available from: \href{https://arxiv.org/abs/2505.00101}{arxiv.org/abs/2505.00101}.
+
+\bibitem{powera1} Relationship of cycling power and non-linear heart rate variability from everyday workout data: potential for intensity-zone estimation and monitoring. 2024. Available from: \href{https://pmc.ncbi.nlm.nih.gov/articles/PMC11280911/}{PMC11280911}.
+
+\bibitem{rogers2025} Rogers B, Fleitas-Paniagua PR, Trpcic M, Zagatto AM, Murias JM. Fractal correlation properties of heart rate variability and respiratory frequency as measures of endurance exercise durability. Eur J Appl Physiol. 2025;125(6):1619--31. Available from: \href{https://doi.org/10.1007/s00421-025-05716-2}{doi:10.1007/s00421-025-05716-2}.
+
+\bibitem{ultra} Rogers B, Mourot L, Doucende G, Gronwald T. Fractal correlation properties of heart rate variability as a biomarker of endurance exercise fatigue in ultramarathon runners. Physiol Rep. 2021;9(14):e14956. Available from: \href{https://pmc.ncbi.nlm.nih.gov/articles/PMC8295593/}{PMC8295593}.
+
+\bibitem{marathon} Gronwald T, Rogers B, Hottenrott L, Hoos O, Hottenrott K. Correlation properties of heart rate variability during a marathon race: a proof-of-concept study. 2021. Available from: \href{https://pmc.ncbi.nlm.nih.gov/articles/PMC8488837/}{PMC8488837}.
+
+\bibitem{rothschild} Rothschild JA, et al. Durability of the moderate-to-heavy-intensity transition can be predicted using readily available markers of physiological decoupling. Eur J Appl Physiol. 2025. Available from: \href{https://pmc.ncbi.nlm.nih.gov/articles/PMC12479576/}{PMC12479576}.
+
+\bibitem{stevens} Stevens CJ, et al. Deterioration of the first ventilatory threshold during prolonged cycling. 2022. Available from: \href{https://pmc.ncbi.nlm.nih.gov/articles/PMC9488873/}{PMC9488873}.
+
+\bibitem{vt15min} Association between deterioration of the first ventilatory threshold and 5-min time-trial power during prolonged cycling. 2024. Available from: \href{https://pmc.ncbi.nlm.nih.gov/articles/PMC11322397/}{PMC11322397}.
+
+\bibitem{banister} Banister EW. Modeling elite athletic performance. In: MacDougall JD, Wenger HA, Green HJ, editors. Physiological testing of the high-performance athlete. 2nd ed. Champaign (IL): Human Kinetics; 1991. Overview available from: \href{https://www.trainingimpulse.com/banisters-trimp-0}{trainingimpulse.com}.
+
+\bibitem{meeusen} Meeusen R, Duclos M, Foster C, Fry A, Gleeson M, Nieman D, et al. Prevention, diagnosis, and treatment of the overtraining syndrome: joint consensus statement of the European College of Sport Science and the American College of Sports Medicine. Eur J Sport Sci. 2013;13(1):1--24. Available from: \href{https://onlinelibrary.wiley.com/doi/10.1080/17461391.2012.730061}{doi:10.1080/17461391.2012.730061}.
+
+\bibitem{rmssd} Resting heart-rate-variability markers of functional overreaching in endurance athletes. 2017. Available from: \href{https://pubmed.ncbi.nlm.nih.gov/28480859/}{PMID:28480859}.
+
+\bibitem{lolli} Lolli L, Batterham AM, Hawkins R, Kelly DM, Strudwick AJ, Thorpe R, et al. Mathematical coupling causes spurious correlation within the conventional acute-to-chronic workload ratio calculations. Br J Sports Med. 2019;53(15):921--2. Available from: \href{https://doi.org/10.1136/bjsports-2017-098110}{doi:10.1136/bjsports-2017-098110}.
+
+\bibitem{impellizzeri} Impellizzeri FM, Woodcock S, Coutts AJ, Fanchini M, McCall A, Vigotsky AD. Acute:chronic workload ratio: conceptual issues and fundamental pitfalls. Int J Sports Physiol Perform. 2020;15(6):907--13. Available from: \href{https://doi.org/10.1123/ijspp.2019-0864}{doi:10.1123/ijspp.2019-0864}.
+
+\end{thebibliography}
+
+\end{document}
