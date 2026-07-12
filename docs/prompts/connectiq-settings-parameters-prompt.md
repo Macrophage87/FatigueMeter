@@ -6,6 +6,16 @@ user-configurable parameter exposed in the Garmin Connect / Connect IQ settings
 menu, using the **exact display name** the athlete sees and in the **exact order**
 the settings appear on screen.
 
+The prompt has **two jobs**, in order:
+
+1. **Reproduce the settings scaffold exactly** — the 43 titles, ids, ranges, and
+   defaults (§ "Parameter list"). This is a pure transcription: names and order are exact.
+2. **Generate a value for each parameter** from an athlete's training record
+   (§ "How to generate each value"). This is the semantic layer: it says, per
+   parameter, whether to personalize it, how to derive the number from the record,
+   or to leave the documented default untouched. Without this layer the scaffold
+   only clones an empty menu — it does not tell you *how the parameters are produced*.
+
 The authoritative sources in this repository are:
 
 - `resources/settings/settings.xml` — the settings menu (order, `propertyKey`, ranges).
@@ -112,20 +122,93 @@ Format: `# | Display title (exact) | property id | control | min | max | default
 | 42 | `Ship AFI number pre-pilot (override)` | `shipNumberOverride` | boolean | — | — | false (boolean) |
 | 43 | `Metric units` | `unitsMetric` | boolean | — | — | true (boolean) |
 
+### How to generate each value from the athlete's training record
+
+The tables above are the **schema**. This section is the **procedure** — it tells you
+how to fill each property in, given an athlete's training record. Do not emit a value
+without following the rule for that parameter.
+
+**Available record inputs (assume you are handed some or all of these):**
+- **Mean-maximal power curve** — the athlete's best average power over durations
+  (5 s, 1, 3, 5, 8, 12, 20, 60 min) from recent rides.
+- **Set / estimated FTP** already recorded on their training platform.
+- **Wellness / HR data** — highest HR ever observed; resting/morning HR trend.
+- **Fitness model** — current **CTL** (42-day EWMA of TSS, "Fitness"), current **ATL**
+  (7-day EWMA, "Fatigue"), and the **TSB = CTL − ATL** history distribution.
+- **Long-ride history** — per-ride total **kJ** and aerobic **decoupling %** (Pw:Hr).
+- **Profile** — sex; unit/locale preference.
+
+**Three generation tiers — classify every parameter into exactly one:**
+
+- **Tier A — Personalize from the record.** Derive a number using the recipe below.
+  Clamp the result to the setting's `[min, max]`; if the required input is missing,
+  fall back to the documented default and say so.
+- **Tier B — Set from a known profile fact.** A direct read (sex, units) — no modelling.
+- **Tier C — Leave at the documented default.** These are un-calibrated model-internal
+  tuning constants (Kalman time-constants, gains, process/measurement noise), data-quality
+  gates, or release flags. An LLM must **not** invent them from a training record — doing
+  so manufactures false confidence in an un-validated filter. Only a formal calibration
+  pilot (white-paper §4.4/§4.5) may change them. Emit the default verbatim.
+
+**Per-parameter generation rules:**
+
+| # | Parameter | Tier | How to generate the value |
+|---|---|---|---|
+| 1 | `FTP (W)` | A | Platform FTP if present; else ≈ 0.95 × best 20-min power, or best ~40–60-min normalized power. Round to nearest watt. |
+| 2 | `Critical Power (W)` | A | Fit the 2-parameter CP model `P(t) = W′/t + CP` to ≥2 maximal efforts (e.g. 3–12 min); `CP` is the asymptote. If no curve, seed CP ≈ FTP. |
+| 3 | `W′ (J)` | A | The `W′` term from the **same** CP-model fit as #2 (anaerobic work capacity). If unfittable, leave default (20000). |
+| 4 | `HR max (bpm)` | A | Highest reliable HR observed in the record (max-effort intervals / field test), not an age formula if real data exists. |
+| 5 | `HR rest (bpm)` | A | Lowest stable resting/morning HR from wellness data. |
+| 6 | `Sex` | B | Direct from profile — set `sexFemale = true` for female, `false` for male. |
+| 7 | `CTL seed` | A | The athlete's **current CTL / "Fitness"** at install time, from the training record. Clamp 0–200. |
+| 8 | `ATL seed` | A | The athlete's **current ATL / "Fatigue"** at install time. Clamp 0–200. |
+| 9–15 | `τ_HR (s)` … `F_ref (bpm)` | C | Acute Kalman time-constants and intensity/duration charges — **leave at default.** Calibration-only. |
+| 16 | `Decoupling OK %` | C→A | Default 5%. May lower toward the athlete's own typical early-ride decoupling **only if** a stable personal baseline exists; otherwise default. |
+| 17 | `Decoupling caution %` | C→A | Default 8%. Keep OK < caution < high; personalize only alongside #16 with real baseline data. |
+| 18 | `Decoupling high %` | C→A | Default 10%. Same ordering constraint as #16/#17. |
+| 19 | `DFA artifact gate %` | C | Data-quality gate — leave default (5%). |
+| 20 | `Durability kJ anchor` | A | The kJ at which the athlete's decoupling historically starts to drift (from long-ride history); else a typical hard-long-ride total. Clamp 800–4000. |
+| 21 | `TRIMP female coeff (0.86/0.64)` | B | Sex-driven: `0.86` (default) unless you deliberately adopt the 0.64 variant; tie to `sexFemale`. |
+| 22 | `AFI fresh cutoff` | C | `F_ref`-dependent convention — calibration-only; leave default. |
+| 23 | `AFI building cutoff` | C | As #22 — leave default (keep fresh < building). |
+| 24 | `AFI drift margin` | C | As #22 — leave default. |
+| 25 | `Decoupling AFI ref %` | C | `F_ref`-tied reference — leave default. |
+| 26 | `TSB fresh band` | A | The TSB at which this athlete's history shows "fresh/productive." Derive from their TSB distribution (e.g. upper quantile) if available; else default 10. Clamp 0–30. |
+| 27 | `TSB overreach band` | A | The TSB at which they historically feel over-reached (lower tail of their TSB distribution). Else default −30. Clamp −60…−10. |
+| 28 | `Steadiness power CV gate` | C | Data-quality gate — leave default. |
+| 29 | `Coasting fraction gate` | C | Data-quality gate — leave default. |
+| 30–39 | `g_P gain (bpm/W)` … `R α1` | C | Kalman gains, sigmoid shape, and process/measurement noise — **leave at default.** These require formal filter calibration; never derive from a training record. |
+| 40 | `Show ACWR (opt-in, contested)` | C | Behavioural flag — leave `false` (contested metric). |
+| 41 | `Numeric AFI unlocked (pilot)` | C | Gated behind the criterion-validity pilot — leave `false`. |
+| 42 | `Ship AFI number pre-pilot (override)` | C | Honesty override — leave `false`. |
+| 43 | `Metric units` | B | From profile/locale — `true` for metric, `false` for imperial. |
+
+**Output contract for the generation step:** for every parameter emit `id`, the chosen
+value, and a one-line reason keyed to its tier — e.g. `ftp = 268 (Tier A: 0.95 × 282 W
+best-20min)`, `κ_i intensity charge = 0.000145 (Tier C: default, calibration-only)`,
+`Metric units = true (Tier B: profile locale)`. Any Tier-A parameter whose input is
+missing must fall back to its default and be reported as such — never fabricate.
+
 ### Notes carried from the source files
 - The `Sex` setting is stored as the boolean `sexFemale` (`false` = Male, `true` = Female).
-  The strings `Male` / `Female` exist for a labelled toggle; the underlying control is boolean.
-- Group headers (`Athlete profile`, `Acute filter (advanced)`, `Bands & thresholds`,
-  `Options`) exist as strings (`SetGroupProfile`, `SetGroupFilter`, `SetGroupBands`,
-  `SetGroupOptions`). The `Filter gains & noise` block is a subsection of the advanced
-  filter settings; keep items 30–39 immediately after item 29 and before Options.
+  The strings `Male` / `Female` exist but are **not referenced** by `settings.xml`, so the
+  control renders as a raw on/off toggle (`on` = Female) with no Male/Female labels.
+- The section names (`Athlete profile`, `Acute filter (advanced)`, `Bands & thresholds`,
+  `Filter gains & noise`, `Options`) are **XML comments** in `settings.xml`, not `<group>`
+  elements. The `SetGroupProfile/Filter/Bands/Options` strings exist but are unreferenced,
+  so Garmin renders a **flat 43-item list** in document order — the groups here are an
+  organizational aid, not on-screen headers. Order across the whole list is still exact:
+  keep items 30–39 immediately after item 29 and before Options.
 - These are **not** every constant in the model — only the values the white paper marks
   "convention" or "synthesis" are exposed as settings (white-paper §9). Do not add or
   remove parameters; the exposed set and their order are the honesty contract
   (changing a setting must change behaviour). See `docs/traceability.md` for provenance.
 
 ### Deliverables
-Produce `resources/settings/settings.xml`, `resources/properties/properties.xml`, and the
-relevant `<string>` entries in `resources/strings/strings.xml` such that the rendered
-Connect IQ settings menu shows the 43 parameters above, with the exact titles, in the
-exact order, with the exact ranges and defaults.
+1. **Scaffold:** `resources/settings/settings.xml`, `resources/properties/properties.xml`,
+   and the relevant `<string>` entries in `resources/strings/strings.xml` such that the
+   rendered Connect IQ settings menu shows the 43 parameters above, with the exact titles,
+   in the exact order, with the exact ranges and defaults.
+2. **Generated values:** a per-parameter list (all 43, in the same order) giving the value
+   you chose, its tier (A/B/C), and the one-line reason, per the output contract above.
+   Tier-C parameters must match the documented defaults exactly.
