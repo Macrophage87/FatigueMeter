@@ -20,6 +20,11 @@ class Config {
     // bands
     var decoupOk; var decoupCaution; var decoupHigh; var artifactGate;
     var powerCvGate; var coastFracGate; var kjAnchor;
+    var afiFresh; var afiBuilding; var afiDriftMargin; var decoupRef;
+    // seeding map (synthesis §7)
+    var seedA; var seedB; var seedTsbScale;
+    // feat/attrition weights (synthesis §8.2)
+    var featWSev; var featMatchW; var featBestW; var attrDriftW;
     // load
     var tsbFresh; var tsbOverreach; var trimpFemaleCoeff; var acwrEnabled;
     // honesty
@@ -93,6 +98,20 @@ class Config {
         powerCvGate   = num("powerCvGate", 0.10).toFloat();
         coastFracGate = num("coastFracGate", 0.10).toFloat();
         kjAnchor      = num("kjAnchor", 2000.0).toFloat();
+
+        afiFresh      = num("afiFresh", Constants.AFI_FRESH_MAX).toFloat();
+        afiBuilding   = num("afiBuilding", Constants.AFI_BUILDING_MAX).toFloat();
+        afiDriftMargin = num("afiDriftMargin", 15.0).toFloat();
+        decoupRef     = num("decoupRef", Constants.DECOUP_REF).toFloat();
+
+        seedA        = num("seedA", 0.6).toFloat();
+        seedB        = num("seedB", 0.4).toFloat();
+        seedTsbScale = num("seedTsbScale", 30.0).toFloat();
+
+        featWSev     = num("featWSev", 0.02).toFloat();
+        featMatchW   = num("featMatchW", 40.0).toFloat();
+        featBestW    = num("featBestW", 30.0).toFloat();
+        attrDriftW   = num("attrDriftW", 100.0).toFloat();
 
         tsbFresh     = num("tsbFresh", Constants.TSB_FRESH).toFloat();
         tsbOverreach = num("tsbOverreach", Constants.TSB_OVERREACH).toFloat();

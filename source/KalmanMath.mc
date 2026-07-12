@@ -90,6 +90,79 @@ module KalmanMath {
         return out;
     }
 
+    //! Row-vector × matrix: r[j] = Σ_i v[i]·A[i][j].
+    function vecMatMul(v, A) {
+        var out = [0.0, 0.0, 0.0, 0.0];
+        for (var j = 0; j < 4; j++) {
+            var s = 0.0;
+            for (var i = 0; i < 4; i++) { s += v[i] * A[i][j]; }
+            out[j] = s;
+        }
+        return out;
+    }
+
+    //! §4.3a mandatory observability/conditioning check. Builds the discrete
+    //! observability matrix O = [H; H·A; H·A²; H·A³] (stacked for every
+    //! measurement row H) and returns the non-degeneracy of the F state:
+    //!   { :observable, :detGram, :fEnergy }
+    //! where detGram = det(OᵀO) (>0 ⇔ full rank ⇔ non-degenerate observability
+    //! Gramian) and fEnergy = (OᵀO)[F][F] (how strongly F projects onto the
+    //! observation history). Proves NUMERICAL recoverability under the assumed
+    //! model only — NOT physiological identifiability (that needs the pilot §10).
+    function observabilityCheck(A, Hrows) {
+        var O = [];
+        for (var h = 0; h < Hrows.size(); h++) {
+            var r = [Hrows[h][0], Hrows[h][1], Hrows[h][2], Hrows[h][3]];
+            O.add(r);
+            for (var pw = 0; pw < 3; pw++) {
+                r = vecMatMul(r, A);
+                O.add(r);
+            }
+        }
+        // Gram = OᵀO (4x4)
+        var G = zeros4x4();
+        for (var i = 0; i < 4; i++) {
+            for (var j = 0; j < 4; j++) {
+                var s = 0.0;
+                for (var k = 0; k < O.size(); k++) { s += O[k][i] * O[k][j]; }
+                G[i][j] = s;
+            }
+        }
+        var det = det4(G);
+        var fEnergy = G[3][3];   // F is state index 3
+        return { :observable => (det > 1.0e-6) && (fEnergy > 1.0e-6),
+                 :detGram => det, :fEnergy => fEnergy };
+    }
+
+    //! Determinant of a 4x4 (cofactor expansion along the first row).
+    function det4(m) {
+        var det = 0.0;
+        for (var c = 0; c < 4; c++) {
+            var minor = minor3(m, 0, c);
+            var sign = (c % 2 == 0) ? 1.0 : -1.0;
+            det += sign * m[0][c] * det3(minor);
+        }
+        return det;
+    }
+    hidden function minor3(m, skipRow, skipCol) {
+        var out = [];
+        for (var i = 0; i < 4; i++) {
+            if (i == skipRow) { continue; }
+            var row = [];
+            for (var j = 0; j < 4; j++) {
+                if (j == skipCol) { continue; }
+                row.add(m[i][j]);
+            }
+            out.add(row);
+        }
+        return out;
+    }
+    hidden function det3(m) {
+        return m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+             - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+             + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    }
+
     //! Force symmetry and a small positive diagonal floor -> keeps P conditioned.
     function symmetrize(P) {
         for (var i = 0; i < 4; i++) {

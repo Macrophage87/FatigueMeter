@@ -96,6 +96,29 @@ It is a required deliverable of `docs/prompts/connectiq-app-generation-prompt.md
     decays via τ_rec. This resolves the spec's internal tension toward the stated
     goal (harness "recovery relaxes F" check).
 
+13. **Per-athlete AFI drift baseline (§4.5).** The band must *also* fire on "AFI
+    drifting above its own rolling baseline-for-power" so the absolute
+    `afiBuilding` cutoff is not the sole gate. Full power-conditioning is heavy
+    on-device, so the baseline is a **slow EWMA of AFI updated only on steady
+    (prior-dominated) segments** (surges don't pollute it), established after a
+    warmup; `afiDriftAboveBaseline()` feeds a `STATUS_DRIFTING` trigger parallel
+    to the α1 drift signal. Margin is the `afiDriftMargin` setting.
+
+14. **Observability/conditioning check (§4.3a).** `KalmanMath.observabilityCheck`
+    builds the discrete observability matrix `O = [H; HA; HA²; HA³]` (both
+    measurement rows), forms the Gramian `OᵀO`, and returns `det(OᵀO)` (>0 ⇔
+    non-degenerate) and the F-diagonal energy. Run once at filter init with the
+    live gains. This proves **numerical recoverability under the assumed model
+    only** — not physiological identifiability (that needs the pilot, §10), and
+    the code/report say so.
+
+15. **End-of-ride & fatigue-added are bucketed (§7).** `fatigueBucket` /
+    `deltaBucket` coarsen the end-of-ride drift and the added delta into
+    fresh/moderate/heavy and small/moderate/large, stored in the Session Result
+    with the AFI uncertainty band. The raw bpm still go to the FIT session field
+    for export, but the in-app/cross-ride presentation is bucketed, matching the
+    start-of-ride treatment.
+
 ## C. Values exposed as SETTINGS because the science flags them convention/synthesis
 
 All are in `resources/properties/properties.xml` (defaults) and
@@ -105,6 +128,14 @@ is hard-coded as if validated).
 
 | Setting | Default | §9 status |
 |---|---|---|
+| `afiFresh / afiBuilding` | 30 / 60 | convention, F_ref-dependent (§4.5) — now gate the band via `cfg`, not hard-coded |
+| `afiDriftMargin` | 15 | per-athlete AFI drift trigger margin (§4.5) |
+| `decoupRef` | 8 % | synthesis — AFI-decoupling common-scale ref (§4.5) |
+| `seedA / seedB / seedTsbScale` | 0.6 / 0.4 / 30 | synthesis — start-of-ride seeding map (§7) |
+| `featWSev / featMatchW / featBestW / attrDriftW` | 0.02 / 40 / 30 / 100 | synthesis — Feat/Attrition weights (§8.2, off critical path) |
+| `gP / a0 / a1 / sigmoidS` | 0.15 / 1.1 / 0.6 / 0.02 | synthesis — now in the settings UI |
+| `qHr / qHrLat / qA1 / qF / rHr / rA1` | see file | hand-set Q/R — now in the settings UI |
+| `powerCvGate / coastFracGate` | 0.10 / 0.10 | steadiness/stationarity gate — now in the settings UI |
 | `decoupOk / decoupCaution / decoupHigh` | 5 / 8 / 10 % | convention (Friel) |
 | `artifactGate` | 5 % | pipeline convention |
 | `powerCvGate / coastFracGate` | 0.10 / 0.10 | steadiness/stationarity gate (engineering) |

@@ -44,6 +44,23 @@
     <property id="coastFracGate"  type="float">0.10</property>
     <property id="kjAnchor"       type="float">2000.0</property>
 
+    <!-- AFI band cutoffs (convention, F_ref-dependent — must be calibrated §4.5) -->
+    <property id="afiFresh"       type="float">30.0</property>
+    <property id="afiBuilding"    type="float">60.0</property>
+    <property id="afiDriftMargin" type="float">15.0</property>
+    <property id="decoupRef"      type="float">8.0</property>
+
+    <!-- Start-of-ride seeding map coefficients (synthesis §7 — configurable) -->
+    <property id="seedA"          type="float">0.6</property>
+    <property id="seedB"          type="float">0.4</property>
+    <property id="seedTsbScale"   type="float">30.0</property>
+
+    <!-- Feat/Attrition weights (synthesis, arbitrary §8.2 — off critical path) -->
+    <property id="featWSev"       type="float">0.02</property>
+    <property id="featMatchW"     type="float">40.0</property>
+    <property id="featBestW"      type="float">30.0</property>
+    <property id="attrDriftW"     type="float">100.0</property>
+
     <!-- Layer-3 TSB / load -->
     <property id="tsbFresh"       type="float">10.0</property>
     <property id="tsbOverreach"   type="float">-30.0</property>

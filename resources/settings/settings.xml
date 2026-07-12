@@ -67,6 +67,62 @@
     <setting propertyKey="@Properties.trimpFemaleCoeff" title="@Strings.SetTrimpFemaleCoeff">
         <settingConfig type="numeric" min="0.5" max="1.0"/>
     </setting>
+    <setting propertyKey="@Properties.afiFresh" title="@Strings.SetAfiFresh">
+        <settingConfig type="numeric" min="10" max="60"/>
+    </setting>
+    <setting propertyKey="@Properties.afiBuilding" title="@Strings.SetAfiBuilding">
+        <settingConfig type="numeric" min="40" max="90"/>
+    </setting>
+    <setting propertyKey="@Properties.afiDriftMargin" title="@Strings.SetAfiDriftMargin">
+        <settingConfig type="numeric" min="5" max="40"/>
+    </setting>
+    <setting propertyKey="@Properties.decoupRef" title="@Strings.SetDecoupRef">
+        <settingConfig type="numeric" min="3" max="20"/>
+    </setting>
+    <setting propertyKey="@Properties.tsbFresh" title="@Strings.SetTsbFresh">
+        <settingConfig type="numeric" min="0" max="30"/>
+    </setting>
+    <setting propertyKey="@Properties.tsbOverreach" title="@Strings.SetTsbOverreach">
+        <settingConfig type="numeric" min="-60" max="-10"/>
+    </setting>
+    <setting propertyKey="@Properties.powerCvGate" title="@Strings.SetPowerCvGate">
+        <settingConfig type="numeric" min="0.02" max="0.5"/>
+    </setting>
+    <setting propertyKey="@Properties.coastFracGate" title="@Strings.SetCoastFracGate">
+        <settingConfig type="numeric" min="0.02" max="0.5"/>
+    </setting>
+
+    <!-- Filter gains & noise (advanced; synthesis-grade — white paper §4.4) -->
+    <setting propertyKey="@Properties.gP" title="@Strings.SetGp">
+        <settingConfig type="numeric" min="0.05" max="0.4"/>
+    </setting>
+    <setting propertyKey="@Properties.a0" title="@Strings.SetA0">
+        <settingConfig type="numeric" min="0.8" max="1.5"/>
+    </setting>
+    <setting propertyKey="@Properties.a1" title="@Strings.SetA1">
+        <settingConfig type="numeric" min="0.2" max="1.2"/>
+    </setting>
+    <setting propertyKey="@Properties.sigmoidS" title="@Strings.SetSigmoidS">
+        <settingConfig type="numeric" min="0.005" max="0.1"/>
+    </setting>
+    <setting propertyKey="@Properties.qHr" title="@Strings.SetQHr">
+        <settingConfig type="numeric" min="0.01" max="5"/>
+    </setting>
+    <setting propertyKey="@Properties.qHrLat" title="@Strings.SetQHrLat">
+        <settingConfig type="numeric" min="0.01" max="5"/>
+    </setting>
+    <setting propertyKey="@Properties.qA1" title="@Strings.SetQA1">
+        <settingConfig type="numeric" min="0.0001" max="0.05"/>
+    </setting>
+    <setting propertyKey="@Properties.qF" title="@Strings.SetQF">
+        <settingConfig type="numeric" min="0.001" max="1"/>
+    </setting>
+    <setting propertyKey="@Properties.rHr" title="@Strings.SetRHr">
+        <settingConfig type="numeric" min="0.5" max="20"/>
+    </setting>
+    <setting propertyKey="@Properties.rA1" title="@Strings.SetRA1">
+        <settingConfig type="numeric" min="0.002" max="0.2"/>
+    </setting>
 
     <!-- Options -->
     <setting propertyKey="@Properties.acwrEnabled" title="@Strings.SetAcwrEnabled">

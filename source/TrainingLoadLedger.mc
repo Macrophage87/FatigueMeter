@@ -19,13 +19,17 @@ class TrainingLoadLedger {
     hidden const KEY_BAK = "fm_ledger_v1_bak";
 
     hidden var cfg;
-    hidden var ctlYesterday;
-    hidden var atlYesterday;
+    hidden var ctlCurrent;      // latest post-fold CTL (end of today so far); persisted as next day's baseline
+    hidden var atlCurrent;      // latest post-fold ATL
+    hidden var ctlDayBase;      // CTL at the START of lastDay (= end of the previous active day)
+    hidden var atlDayBase;      // ATL at the START of lastDay — the fold base, fixed for all of today's rides
     hidden var chronic28;       // 28-day EWMA for ACWR (opt-in)
     hidden var acute7;          // 7-day EWMA for ACWR (opt-in)
+    hidden var chronic28Base;   // start-of-day base for chronic28 (idempotent fold)
+    hidden var acute7Base;      // start-of-day base for acute7
     hidden var lastDay;         // integer day index of last fold
     hidden var todayTss;        // accumulated TSS folded for lastDay
-    hidden var ctlHistory;      // recent daily CTL (for ramp)
+    hidden var ctlHistory;      // recent [dayIndex, ctl] pairs (for the weekly ramp)
     hidden var rmssdHistory;    // last 7 resting RMSSD values
 
     // live within-ride accumulators
@@ -120,16 +124,20 @@ class TrainingLoadLedger {
     //  LIVE READOUTS (start-of-ride residual context)
     // =====================================================================
 
-    function ctl() { return ctlYesterday; }
-    function atl() { return atlYesterday; }
-    function tsb() { return tsbFrom(ctlYesterday, atlYesterday); }
+    // Start-of-ride ("form") readouts use the fixed day baseline, i.e. CTL_y − ATL_y
+    // (white paper §5): the values at the end of the previous active day. These are
+    // stable through the ride and are what the start-of-ride context should show.
+    function ctl() { return ctlDayBase; }
+    function atl() { return atlDayBase; }
+    function tsb() { return tsbFrom(ctlDayBase, atlDayBase); }
 
     //! Seed for F(0): converts residual load state to "bpm of pre-existing drift"
     //! (white paper §7). SYNTHESIS, uncited — presented downstream as a COARSE
     //! BUCKET, never a point value.
     //!   F(0) = F_ref·clamp( a·max(0,−TSB)/TSB_scale + b·max(0,−RMSSD_z), 0, 0.6 )
     function seedFatigueBpm() {
-        var a = 0.6; var b = 0.4; var tsbScale = 30.0;
+        // a, b, TSB_scale are configurable (white paper §7 — synthesis map).
+        var a = cfg.seedA; var b = cfg.seedB; var tsbScale = cfg.seedTsbScale;
         var negTsb = -tsb();
         if (negTsb < 0) { negTsb = 0; }
         var rmssdZ = rmssdDeviationZ();
@@ -178,12 +186,31 @@ class TrainingLoadLedger {
         return acute7 / chronic28;
     }
 
-    //! Weekly CTL ramp (preferred over-reach cue). null until enough history.
+    //! Weekly CTL ramp (preferred over-reach cue), indexed by DAY not by ride
+    //! count. null until ~7 days of history exist. ctlHistory holds [day, ctl]
+    //! pairs; find the entry ~7 days before today.
     function ctlRampPerWeek() {
-        if (ctlHistory.size() < 8) { return null; }
-        var now = ctlHistory[ctlHistory.size() - 1];
-        var weekAgo = ctlHistory[ctlHistory.size() - 8];
-        return now - weekAgo;
+        if (ctlHistory.size() < 2) { return null; }
+        var today = dayIndex();
+        var target = today - 7;
+        var refCtl = null;
+        // pick the newest sample whose day is <= target (i.e. ~a week ago)
+        for (var i = 0; i < ctlHistory.size(); i++) {
+            var pair = ctlHistory[i];
+            if (pair[0] <= target) { refCtl = pair[1]; }
+        }
+        if (refCtl == null) { return null; }   // history doesn't span a week yet
+        return ctlCurrent - refCtl;
+    }
+
+    //! Record today's post-fold CTL in the daily history (one entry per day).
+    hidden function recordDailyCtl(day, ctlVal) {
+        if (ctlHistory.size() > 0 && ctlHistory[ctlHistory.size() - 1][0] == day) {
+            ctlHistory[ctlHistory.size() - 1] = [day, ctlVal];   // update today's entry
+        } else {
+            ctlHistory.add([day, ctlVal]);
+        }
+        while (ctlHistory.size() > 60) { ctlHistory.remove(ctlHistory[0]); }
     }
 
     // =====================================================================
@@ -197,31 +224,39 @@ class TrainingLoadLedger {
         var load = rideLoad();
         var day = dayIndex();
 
+        var startTsb = tsbFrom(ctlDayBase, atlDayBase);   // CTL_y − ATL_y (form)
+
         if (day != lastDay) {
-            // new day: yesterday's stored values already reflect prior days'
-            // EWMA; carry them forward (missed days decay handled at load()).
+            // new day: the current end-of-previous-day values become today's fixed
+            // fold baseline. (Missed-day decay is applied at load().)
+            ctlDayBase = ctlCurrent;
+            atlDayBase = atlCurrent;
+            acute7Base = acute7;
+            chronic28Base = chronic28;
             lastDay = day;
             todayTss = 0.0;
         }
         todayTss += load;
 
-        var ctlToday = ewmaFold(ctlYesterday, todayTss, Constants.CTL_TAU);
-        var atlToday = ewmaFold(atlYesterday, todayTss, Constants.ATL_TAU);
-
-        // shift: today's become the new "yesterday" baseline for the next ride
-        ctlYesterday = ctlToday;
-        atlYesterday = atlToday;
+        // Fold the day's SUMMED TSS against the FIXED day baseline. This is
+        // idempotent across multiple rides the same day (no double-application):
+        // the base never moves, only todayTss grows.
+        var ctlToday = ewmaFold(ctlDayBase, todayTss, Constants.CTL_TAU);
+        var atlToday = ewmaFold(atlDayBase, todayTss, Constants.ATL_TAU);
+        ctlCurrent = ctlToday;
+        atlCurrent = atlToday;
 
         if (cfg.acwrEnabled) {
-            acute7 = ewmaFold(acute7, todayTss, 7.0);
-            chronic28 = ewmaFold(chronic28, todayTss, 28.0);
+            // ACWR EWMAs also fold from their own fixed daily base to stay idempotent.
+            acute7 = ewmaFold(acute7Base, todayTss, 7.0);
+            chronic28 = ewmaFold(chronic28Base, todayTss, 28.0);
         }
 
-        ctlHistory.add(ctlToday);
-        while (ctlHistory.size() > 60) { ctlHistory.remove(ctlHistory[0]); }
-
+        recordDailyCtl(day, ctlToday);
         save();
-        return { :ctl => ctlToday, :atl => atlToday, :tsb => tsbFrom(ctlToday, atlToday),
+        return { :ctlStart => ctlDayBase, :atlStart => atlDayBase,
+                 :ctlEnd => ctlToday, :atlEnd => atlToday,
+                 :startTsb => startTsb, :tsb => tsbFrom(ctlToday, atlToday),
                  :load => load };
     }
 
@@ -240,23 +275,31 @@ class TrainingLoadLedger {
         if (d == null || !isValid(d)) { d = readKey(KEY_BAK); }
         if (d == null || !isValid(d)) {
             // cold start from athlete profile seeds
-            ctlYesterday = cfg.ctlSeed;
-            atlYesterday = cfg.atlSeed;
+            ctlCurrent = cfg.ctlSeed;
+            atlCurrent = cfg.atlSeed;
+            ctlDayBase = cfg.ctlSeed;
+            atlDayBase = cfg.atlSeed;
             chronic28 = cfg.ctlSeed;
             acute7 = cfg.atlSeed;
+            chronic28Base = cfg.ctlSeed;
+            acute7Base = cfg.atlSeed;
             lastDay = dayIndex();
             todayTss = 0.0;
-            ctlHistory = [cfg.ctlSeed];
+            ctlHistory = [[dayIndex(), cfg.ctlSeed]];
             rmssdHistory = [];
             return;
         }
-        ctlYesterday = d["ctl"];
-        atlYesterday = d["atl"];
+        ctlCurrent = d["ctl"];
+        atlCurrent = d["atl"];
+        ctlDayBase = d.hasKey("ctlBase") ? d["ctlBase"] : ctlCurrent;
+        atlDayBase = d.hasKey("atlBase") ? d["atlBase"] : atlCurrent;
         chronic28 = d.hasKey("chronic28") ? d["chronic28"] : cfg.ctlSeed;
         acute7 = d.hasKey("acute7") ? d["acute7"] : cfg.atlSeed;
+        chronic28Base = d.hasKey("chronic28Base") ? d["chronic28Base"] : chronic28;
+        acute7Base = d.hasKey("acute7Base") ? d["acute7Base"] : acute7;
         lastDay = d["lastDay"];
         todayTss = d["todayTss"];
-        ctlHistory = d.hasKey("ctlHistory") ? d["ctlHistory"] : [ctlYesterday];
+        ctlHistory = d.hasKey("ctlHistory") ? d["ctlHistory"] : [[lastDay, ctlCurrent]];
         rmssdHistory = d.hasKey("rmssd") ? d["rmssd"] : [];
 
         // decay for any full days missed since the last fold (EWMA relaxes toward 0)
@@ -264,9 +307,14 @@ class TrainingLoadLedger {
         var missed = today - lastDay;
         if (missed > 0 && missed < 400) {
             for (var i = 0; i < missed; i++) {
-                ctlYesterday = ewmaFold(ctlYesterday, 0.0, Constants.CTL_TAU);
-                atlYesterday = ewmaFold(atlYesterday, 0.0, Constants.ATL_TAU);
+                ctlCurrent = ewmaFold(ctlCurrent, 0.0, Constants.CTL_TAU);
+                atlCurrent = ewmaFold(atlCurrent, 0.0, Constants.ATL_TAU);
             }
+            // a fresh day starts from the decayed end-of-last-active-day values
+            ctlDayBase = ctlCurrent;
+            atlDayBase = atlCurrent;
+            acute7Base = acute7;
+            chronic28Base = chronic28;
             lastDay = today;
             todayTss = 0.0;
         }
@@ -287,8 +335,10 @@ class TrainingLoadLedger {
     //! the primary. A crash between the two leaves at least one intact copy that
     //! load() validates and prefers.
     hidden function save() {
-        var d = { "ctl" => ctlYesterday, "atl" => atlYesterday,
+        var d = { "ctl" => ctlCurrent, "atl" => atlCurrent,
+                  "ctlBase" => ctlDayBase, "atlBase" => atlDayBase,
                   "chronic28" => chronic28, "acute7" => acute7,
+                  "chronic28Base" => chronic28Base, "acute7Base" => acute7Base,
                   "lastDay" => lastDay, "todayTss" => todayTss,
                   "ctlHistory" => ctlHistory, "rmssd" => rmssdHistory };
         try {

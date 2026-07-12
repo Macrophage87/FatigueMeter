@@ -48,22 +48,23 @@ class EffortCharacterizer {
     //  PURE STATIC SCORES (unit-testable)
     // =====================================================================
 
-    //! FeatScore ∝ kJ_above_CP + w_sev·(severe-domain time) + Σ match depths
-    //!           + best-effort bonuses (§8.2).
-    static function featScore(kjAboveCp, severeSeconds, matchDepthSum, be5w, cp) {
-        var wSev = 0.02;             // synthesis weight (§8.2 — arbitrary, labelled)
+    //! FeatScore ∝ kJ_above_CP + w_sev·(severe-domain time) + w_match·Σ match
+    //!           depths + w_best·best-effort bonuses (§8.2). All weights are
+    //!           SYNTHESIS-grade and passed in from settings (arbitrary, labelled).
+    static function featScore(kjAboveCp, severeSeconds, matchDepthSum, be5w, cp,
+                              wSev, wMatch, wBest) {
         var bestBonus = 0.0;
-        if (cp > 1.0e-6 && be5w > cp) { bestBonus = (be5w - cp) / cp * 30.0; }
+        if (cp > 1.0e-6 && be5w > cp) { bestBonus = (be5w - cp) / cp * wBest; }
         return kjAboveCp
              + wSev * severeSeconds
-             + matchDepthSum * 40.0
+             + matchDepthSum * wMatch
              + bestBonus;
     }
 
     //! AttritionScore ∝ (decoupling above baseline)·(time sub-threshold past the
-    //! durability anchor) + (α1 drift below personal baseline-for-power) (§8.2).
-    static function attritionScore(attritionAccum, alpha1DriftBelow) {
-        var driftTerm = (alpha1DriftBelow > 0) ? alpha1DriftBelow * 100.0 : 0.0;
+    //! durability anchor) + w_drift·(α1 drift below personal baseline) (§8.2).
+    static function attritionScore(attritionAccum, alpha1DriftBelow, wDrift) {
+        var driftTerm = (alpha1DriftBelow > 0) ? alpha1DriftBelow * wDrift : 0.0;
         return attritionAccum + driftTerm;
     }
 
@@ -118,10 +119,11 @@ class EffortCharacterizer {
 
     function feat(be5wValue) {
         return featScore(kjAboveCpValue(), timeSevereS, matchDepthSum,
-                         be5wValue, cfg.cp);
+                         be5wValue, cfg.cp,
+                         cfg.featWSev, cfg.featMatchW, cfg.featBestW);
     }
     function attrition(alpha1DriftBelow) {
-        return attritionScore(attritionAccum, alpha1DriftBelow);
+        return attritionScore(attritionAccum, alpha1DriftBelow, cfg.attrDriftW);
     }
 
     // kJ above CP is owned by PrimitivesCalculator; the view passes it in via feat().

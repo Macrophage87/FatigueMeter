@@ -49,13 +49,18 @@ class StatusEvaluator {
 
         var advisoryActive = pastTime && pastKj && decoupHigh;
 
-        // --- AFI band (per-athlete-calibrated F_ref scale; §4.5) ---
+        // Per-athlete AFI drift above the athlete's own rolling baseline (§4.5) —
+        // fires the severe band in parallel to the α1 drift signal, so the
+        // convention-grade absolute cutoff (afiBuilding, an F_ref-dependent
+        // default) is NOT the sole gate.
+        var afiDrift = ctx[:afiDrift];
+        var afiDriftsHigh = (afiDrift != null && afiDrift > cfg.afiDriftMargin);
+
+        // --- AFI band: absolute (calibrated F_ref scale) OR per-athlete drift ---
         var status;
-        if (afi != null && afi >= Constants.AFI_BUILDING_MAX) {
+        if ((afi != null && afi >= cfg.afiBuilding) || afiDriftsHigh || advisoryActive) {
             status = DescriptiveStrings.STATUS_DRIFTING;
-        } else if (advisoryActive) {
-            status = DescriptiveStrings.STATUS_DRIFTING;
-        } else if ((afi != null && afi >= Constants.AFI_FRESH_MAX)
+        } else if ((afi != null && afi >= cfg.afiFresh)
                    || (decoupUsable && decoupDrift > cfg.decoupOk)) {
             status = DescriptiveStrings.STATUS_BUILDING;
         } else {

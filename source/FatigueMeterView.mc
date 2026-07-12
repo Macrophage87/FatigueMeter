@@ -49,6 +49,8 @@ class FatigueMeterView extends WatchUi.DataField {
     hidden var dSourceSwitched;
     hidden var dPriorDominated;
     hidden var dRedKind;
+    hidden var dPowerAvail;
+    hidden var dStationary;
 
     function initialize() {
         DataField.initialize();
@@ -81,6 +83,8 @@ class FatigueMeterView extends WatchUi.DataField {
         dSourceSwitched = false;
         dPriorDominated = true;
         dRedKind = "none";
+        dPowerAvail = false;
+        dStationary = false;
 
         registerSensors();
     }
@@ -144,6 +148,8 @@ class FatigueMeterView extends WatchUi.DataField {
         var active = (cadence != null && cadence > 0)
                      || (power != null && power > 0.05 * cfg.ftp);
         var stationary = prims.isStationary();
+        dStationary = stationary;
+        dPowerAvail = (power != null);
 
         // ---- Layer 1 ----
         prims.update(power, hr, cadence, rr, tick);
@@ -207,7 +213,8 @@ class FatigueMeterView extends WatchUi.DataField {
         dStatus = StatusEvaluator.evaluate(cfg, {
             :afi => afi, :decoupMetric => dDecoup, :alpha1Metric => a1Metric,
             :kjWeighted => dKjw, :elapsedS => tick, :wRr => wRr,
-            :redKind => dRedKind, :sensorsPresent => sensorsPresent
+            :redKind => dRedKind, :sensorsPresent => sensorsPresent,
+            :afiDrift => filter.afiDriftAboveBaseline()
         });
 
         // ---- time-in-red split (Feat vs Attrition minutes — §8.3) ----
@@ -242,12 +249,20 @@ class FatigueMeterView extends WatchUi.DataField {
 
         var endF = filter.fState();
         var fold = ledger.finalizeRide();
+        var added = endF - startFatigueBpm;
+
+        // §7: end-of-ride fatigue and fatigue-added are BUCKETED (differences of
+        // soft, weakly-observable estimates), never presented as point bpm on
+        // screen. The raw bpm still flow to the FIT session field for export.
+        var startBucketLbl = AcuteFatigueFilter.fatigueBucket(startFatigueBpm, cfg.fRef);
+        var endBucketLbl = AcuteFatigueFilter.fatigueBucket(endF, cfg.fRef);
+        var addedBucketLbl = AcuteFatigueFilter.deltaBucket(added, cfg.fRef);
 
         var summary = {
             :tss => fold[:load],
             :startFatigue => startFatigueBpm,
             :endFatigue => endF,
-            :fatigueAdded => (endF - startFatigueBpm),
+            :fatigueAdded => added,
             :peakAfi => peakAfi,
             :redFeatS => effort.redFeatSeconds(),
             :redAttrS => effort.redAttritionSeconds(),
@@ -257,12 +272,13 @@ class FatigueMeterView extends WatchUi.DataField {
 
         var result = SessionStore.buildResult(
             ledger.dayIndexPublic(), tick, fold[:load],
-            startFatigueBpm, endF, endF - startFatigueBpm, peakAfi,
+            startFatigueBpm, endF, added, peakAfi,
             effort.redFeatSeconds(), effort.redAttritionSeconds(),
             effort.feat(effort.best5()), effort.attrition(0.0),
             effort.best1(), effort.best5(), effort.best20(),
             effort.matchesBurned(), prims.kjWeightedValue(),
-            fold[:ctl], fold[:atl], fold[:tsb]);
+            fold[:ctlEnd], fold[:atlEnd], fold[:startTsb],
+            startBucketLbl, endBucketLbl, addedBucketLbl, filter.afiUncertainty());
         sessions.append(result);
     }
 
@@ -276,11 +292,13 @@ class FatigueMeterView extends WatchUi.DataField {
         dc.setColor(Graphics.COLOR_WHITE, 0x111111);
         dc.clear();
 
-        drawStatusBand(dc, w, h, 0, (h * 0.30).toNumber());
-        drawDial(dc, w, h, (h * 0.30).toNumber(), (h * 0.22).toNumber());
-        drawEvidenceRow(dc, w, h, (h * 0.52).toNumber(), (h * 0.20).toNumber());
-        drawFeatsStrip(dc, w, h, (h * 0.72).toNumber(), (h * 0.14).toNumber());
-        drawFooter(dc, w, h, (h * 0.86).toNumber(), (h * 0.14).toNumber());
+        // Evidence row is given AT LEAST equal height to the status band (§8.1 —
+        // the primitives are the validated part), 0.26·h each.
+        drawStatusBand(dc, w, h, 0, (h * 0.26).toNumber());
+        drawDial(dc, w, h, (h * 0.26).toNumber(), (h * 0.18).toNumber());
+        drawEvidenceRow(dc, w, h, (h * 0.44).toNumber(), (h * 0.26).toNumber());
+        drawFeatsStrip(dc, w, h, (h * 0.70).toNumber(), (h * 0.13).toNumber());
+        drawFooter(dc, w, h, (h * 0.83).toNumber(), (h * 0.17).toNumber());
     }
 
     hidden function statusColor(status) {
@@ -314,9 +332,10 @@ class FatigueMeterView extends WatchUi.DataField {
                         Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
         }
 
-        // persistent honesty tag ON THE BAND itself
-        var tag = dCalibrated ? DescriptiveStrings.advisoryTag()
-                              : DescriptiveStrings.uncalibratedTag();
+        // persistent honesty tag ON THE BAND itself — the "advisory · not a
+        // validated measurement" tag is ALWAYS present (the "uncalibrated" note is
+        // shown separately in the footer, not as a replacement for this one).
+        var tag = DescriptiveStrings.advisoryTag();
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
         dc.drawText(w / 2, y + bandH * 0.85, Graphics.FONT_XTINY, tag,
                     Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
@@ -392,8 +411,13 @@ class FatigueMeterView extends WatchUi.DataField {
         drawCell(dc, cellW, y, cellW, rowH, "DFA-a1",
                  fmtAlpha(dAlpha1), metricColor(dAlpha1));
         drawKjBar(dc, 2 * cellW, y, cellW, rowH);
-        drawCell(dc, 3 * cellW, y, cellW, rowH, "MATCHES",
-                 dWmatches.format("%d"), Graphics.COLOR_WHITE);
+        // matches (W′bal) is power-dependent — grey with a marker on power loss.
+        if (dPowerAvail) {
+            drawCell(dc, 3 * cellW, y, cellW, rowH, "MATCHES",
+                     dWmatches.format("%d"), Graphics.COLOR_WHITE);
+        } else {
+            drawCell(dc, 3 * cellW, y, cellW, rowH, "MATCHES", "— no pwr", 0x777777);
+        }
     }
 
     hidden function drawCell(dc, x, y, cw, ch, title, value, valColor) {
@@ -409,6 +433,12 @@ class FatigueMeterView extends WatchUi.DataField {
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
         dc.drawText(x + cw / 2, y + ch * 0.20, Graphics.FONT_XTINY, "kJ/ANCHOR",
                     Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+        if (!dPowerAvail) {
+            dc.setColor(0x777777, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(x + cw / 2, y + ch * 0.60, Graphics.FONT_MEDIUM, "no power",
+                        Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+            return;
+        }
         var frac = MathUtil.clamp(MathUtil.safeDiv(dKjw, cfg.kjAnchor, 0.0), 0.0, 1.0);
         var bw = (cw * 0.7).toNumber();
         var bx = x + (cw * 0.15).toNumber();
@@ -427,8 +457,13 @@ class FatigueMeterView extends WatchUi.DataField {
     //! 4. Feats strip: best 5-min power, matches, TSB / start-fatigue context.
     hidden function drawFeatsStrip(dc, w, h, y, rowH) {
         var cellW = w / 3;
-        drawCell(dc, 0, y, cellW, rowH, "BEST 5min",
-                 dBest5.format("%.0f") + "W", 0xFFCC33);
+        // best-5 is power-dependent: grey with "no power" when the meter is absent.
+        if (dPowerAvail) {
+            drawCell(dc, 0, y, cellW, rowH, "BEST 5min",
+                     dBest5.format("%.0f") + "W", 0xFFCC33);
+        } else {
+            drawCell(dc, 0, y, cellW, rowH, "BEST 5min", "no power", 0x777777);
+        }
         drawCell(dc, cellW, y, cellW, rowH, "TSB",
                  dTsb.format("%.0f"), tsbColor(dTsb));
         drawCell(dc, 2 * cellW, y, cellW, rowH, "START",
@@ -441,17 +476,22 @@ class FatigueMeterView extends WatchUi.DataField {
         return 0xD9A400;
     }
 
-    //! 5. Data-quality footer: artifact %/α1 validity + stationarity + fallback.
+    //! 5. Data-quality footer: artifact %/α1 validity + stationarity + fallback +
+    //! the "uncalibrated" note (when applicable) + the non-medical disclaimer.
     hidden function drawFooter(dc, w, h, y, rowH) {
         dc.setColor(0x1A1A1A, Graphics.COLOR_TRANSPARENT);
         dc.fillRectangle(0, y, w, rowH);
-        var msg = footerText();
+
+        // line 1: RR artifact / α1 validity + steadiness indicator
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w / 2, y + rowH * 0.35, Graphics.FONT_XTINY, msg,
+        dc.drawText(w / 2, y + rowH * 0.16, Graphics.FONT_XTINY, footerText(),
                     Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
-        // second line: advisory basis when α1 gated (decoupling+kJ alone)
+
+        // line 2: advisory basis / uncalibrated note
         var line2 = "";
-        if (dStatus[:decoupOnly]) {
+        if (!dCalibrated) {
+            line2 = DescriptiveStrings.uncalibratedTag();
+        } else if (dStatus[:decoupOnly]) {
             line2 = DescriptiveStrings.decoupOnlyTag();
         } else if (dStatus[:alpha1Gated] && dStatus[:advisoryActive]) {
             line2 = "advisory on decoupling + kJ only (a1 gated) — weighted down";
@@ -459,20 +499,27 @@ class FatigueMeterView extends WatchUi.DataField {
             line2 = "steady power: AFI prior-dominated";
         }
         if (!line2.equals("")) {
-            dc.drawText(w / 2, y + rowH * 0.75, Graphics.FONT_XTINY, line2,
+            dc.drawText(w / 2, y + rowH * 0.45, Graphics.FONT_XTINY, line2,
                         Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
         }
+
+        // line 3: persistent non-medical-device disclaimer (white paper §10)
+        dc.setColor(0x888888, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(w / 2, y + rowH * 0.78, Graphics.FONT_XTINY,
+                    DescriptiveStrings.notMedical(),
+                    Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
     hidden function footerText() {
-        if (dArtifact == null) { return "no RR — decoupling-only"; }
+        var steady = dStationary ? "steady" : "variable";
+        if (dArtifact == null) { return "no RR — decoupling-only  ·  " + steady; }
         var q = "";
         if (dAlpha1 != null && dAlpha1.availability == Signals.AVAIL_OK) {
             q = "a1 ok";
         } else if (dAlpha1 != null && dAlpha1.label != null) {
             q = "a1 " + dAlpha1.label;
         }
-        return "RR artifact " + dArtifact.format("%.0f") + "%  ·  " + q;
+        return "RR artifact " + dArtifact.format("%.0f") + "%  ·  " + q + "  ·  " + steady;
     }
 
     // ---- metric formatting / colours ----

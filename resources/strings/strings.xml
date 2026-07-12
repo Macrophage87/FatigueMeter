@@ -20,7 +20,7 @@
     <string id="AdvisoryTag">advisory · not a validated measurement</string>
     <string id="UncalibratedTag">uncalibrated — estimate only</string>
     <string id="DecoupOnlyTag">decoupling-only (RR poor)</string>
-    <string id="NotMedical">Not a medical device. Within-ride fatigue estimate is unvalidated on outdoor variable-power rides.</string>
+    <string id="NotMedical">Not a medical device · within-ride fatigue unvalidated outdoors</string>
 
     <!-- Coarse start-of-ride / fatigue-added buckets (white paper §7) -->
     <string id="BucketFresh">fresh</string>
@@ -56,6 +56,25 @@
     <string id="SetArtifactGate">DFA artifact gate %</string>
     <string id="SetKjAnchor">Durability kJ anchor</string>
     <string id="SetTrimpFemaleCoeff">TRIMP female coeff (0.86/0.64)</string>
+
+    <string id="SetAfiFresh">AFI fresh cutoff</string>
+    <string id="SetAfiBuilding">AFI building cutoff</string>
+    <string id="SetAfiDriftMargin">AFI drift margin</string>
+    <string id="SetDecoupRef">Decoupling AFI ref %</string>
+    <string id="SetTsbFresh">TSB fresh band</string>
+    <string id="SetTsbOverreach">TSB overreach band</string>
+    <string id="SetPowerCvGate">Steadiness power CV gate</string>
+    <string id="SetCoastFracGate">Coasting fraction gate</string>
+    <string id="SetGp">g_P gain (bpm/W)</string>
+    <string id="SetA0">Sigmoid a0</string>
+    <string id="SetA1">Sigmoid a1</string>
+    <string id="SetSigmoidS">Sigmoid slope s</string>
+    <string id="SetQHr">Q HR_ss</string>
+    <string id="SetQHrLat">Q HR</string>
+    <string id="SetQA1">Q α1</string>
+    <string id="SetQF">Q F</string>
+    <string id="SetRHr">R HR</string>
+    <string id="SetRA1">R α1</string>
 
     <string id="SetGroupOptions">Options</string>
     <string id="SetAcwrEnabled">Show ACWR (opt-in, contested)</string>

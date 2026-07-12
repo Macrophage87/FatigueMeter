@@ -142,8 +142,11 @@ class PrimitivesCalculator {
         if (cadence != null && cadence >= 0) { winCad.push(cadence); } else { winCad.push(0); }
 
         // --- capture EF / cadence baselines over minutes 5..15 ---
+        // Build the baseline EF with the SAME NP window (the 10-min rolling
+        // buffer) that decouplingMetric() uses for EF_window, so decoupling is an
+        // apples-to-apples EF drift, not a 30 s-vs-10 min artifact (review #2).
         if (elapsed >= Constants.EF_BASELINE_START_S && elapsed <= Constants.EF_BASELINE_END_S) {
-            var npNow = normalizedPower(powerNp.toArray());
+            var npNow = normalizedPower(winPower.toArray());
             var hrArr = winHr.toArray();
             var hrMean = nonZeroMean(hrArr);
             if (npNow > 0 && hrMean > 0) {

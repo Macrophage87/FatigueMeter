@@ -50,11 +50,17 @@ class SessionStore {
     static function buildResult(date, durationS, tss, startFatigue, endFatigue,
                                 fatigueAdded, peakAfi, redFeatS, redAttrS,
                                 featScore, attritionScore, best1, best5, best20,
-                                matches, durabilityKj, ctl, atl, tsb) {
+                                matches, durabilityKj, ctl, atl, tsb,
+                                startBucket, endBucket, addedBucket, fatigueBandPts) {
+        // Raw bpm (startFatigue/endFatigue/fatigueAdded) are kept for FIT export;
+        // the coarse BUCKETS + uncertainty band (white paper §7) are what the
+        // cross-ride comparison view should present — never the raw point value.
         return {
             "date" => date, "durationS" => durationS, "tss" => tss,
             "startFatigue" => startFatigue, "endFatigue" => endFatigue,
             "fatigueAdded" => fatigueAdded, "peakAfi" => peakAfi,
+            "startBucket" => startBucket, "endBucket" => endBucket,
+            "addedBucket" => addedBucket, "fatigueBandPts" => fatigueBandPts,
             "redFeatS" => redFeatS, "redAttrS" => redAttrS,
             "featScore" => featScore, "attritionScore" => attritionScore,
             "best1" => best1, "best5" => best5, "best20" => best20,

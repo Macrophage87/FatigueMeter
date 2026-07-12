@@ -17,7 +17,11 @@ using Toybox.Math;
 //! respiration-/artifact-driven α1 excursions cannot manufacture fatigue.
 class AcuteFatigueFilter {
 
-    // state indices
+    // state indices. S_F is the RESIDUAL CARDIOVASCULAR-DRIFT state (bpm) — NOT
+    // "the VO₂ slow component" (white paper §4.1). It is a catch-all residual that
+    // absorbs everything lifting HR at fixed power (thermal/plasma-volume drift,
+    // dehydration, glycogen, caffeine, altitude, emotional load) AND efficiency
+    // loss; it co-varies with the slow component but is not a measurement of it.
     enum { S_HRSS = 0, S_HR = 1, S_A1 = 2, S_F = 3 }
 
     hidden var x;      // Array[4]
@@ -30,6 +34,13 @@ class AcuteFatigueFilter {
     hidden var dominantRr;       // true when Kalman/RR source dominates the AFI blend
     hidden var lastDominantRr;
     hidden var sourceSwitched;
+    // per-athlete rolling AFI-for-power baseline (§4.5 — parallel to the α1
+    // drift-below-baseline treatment, so the absolute AFI>85-style cutoff is not
+    // the sole gate). Updated only on steady (prior-dominated) segments.
+    hidden var afiBaseline;
+    hidden var afiBaseCount;
+    hidden var lastAfi;
+    hidden var obs;              // cached observability/conditioning check (§4.3a)
 
     function initialize(config) {
         cfg = config;
@@ -40,6 +51,11 @@ class AcuteFatigueFilter {
         dominantRr = false;
         lastDominantRr = false;
         sourceSwitched = false;
+        afiBaseline = null;
+        afiBaseCount = 0;
+        lastAfi = 0.0;
+        obs = null;
+        fbSeen = false;
         x = [0.0, 0.0, Constants.AET_ALPHA1, 0.0];
         P = KalmanMath.zeros4x4();
         lastPower = 0.0;
@@ -53,6 +69,8 @@ class AcuteFatigueFilter {
         seedF = MathUtil.clamp(f0, 0.0, cfg.fRef);
     }
 
+    hidden var fbSeen;   // suppress the spurious first-step |Δfb| inflation (lastFb=0)
+
     hidden function initState(hr, alpha1) {
         var hr0 = (hr != null && hr > 0) ? hr.toFloat() : (cfg.hrRest + 20.0);
         var a10 = (alpha1 != null && alpha1 > 0) ? alpha1 : Constants.AET_ALPHA1;
@@ -63,7 +81,32 @@ class AcuteFatigueFilter {
         P[S_A1][S_A1] = Constants.P0_A1;
         P[S_F][S_F] = Constants.P0_F;
         initialized = true;
+        computeObservability();
     }
+
+    //! §4.3a: run the mandatory observability/conditioning check once with the
+    //! current gains and cache the result. `F` is observable here because it
+    //! couples into both HR (A[HR][F]) and, via −c_F, into the A1 channel — the
+    //! Gramian is non-degenerate under the assumed model. (This proves numerical
+    //! recoverability only; physiological identifiability needs the pilot, §10.)
+    hidden function computeObservability() {
+        var dtHr = 1.0 / cfg.tauHr;
+        var dtA = 1.0 / cfg.tauA;
+        var dtRec = 1.0 / cfg.tauRec;
+        var A = KalmanMath.zeros4x4();
+        A[S_HR][S_HRSS] = dtHr;
+        A[S_HR][S_HR] = 1.0 - dtHr;
+        A[S_HR][S_F] = dtHr;
+        A[S_A1][S_A1] = 1.0 - dtA;
+        A[S_A1][S_F] = -dtA * cfg.cF;
+        A[S_F][S_F] = 1.0 - dtRec;
+        var Hrows = [ [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0] ];
+        obs = KalmanMath.observabilityCheck(A, Hrows);
+    }
+
+    function isFObservable() { return (obs != null) && obs[:observable]; }
+    function observabilityDetGram() { return (obs != null) ? obs[:detGram] : 0.0; }
+    function observabilityFEnergy() { return (obs != null) ? obs[:fEnergy] : 0.0; }
 
     // =====================================================================
     //  PURE STATIC PIECES (unit-testable)
@@ -85,6 +128,25 @@ class AcuteFatigueFilter {
     //! AFI from F: 100·clamp(F/F_ref, 0, 1). An index, not a measurement (§4.5).
     static function afiFromF(f, fRef) {
         return 100.0 * MathUtil.clamp(MathUtil.safeDiv(f, fRef, 0.0), 0.0, 1.0);
+    }
+
+    //! Coarse fatigue bucket for a drift value in bpm (white paper §7): end-of-ride
+    //! and fatigue-added are reported as buckets, NOT point values, because they
+    //! are differences of soft, weakly-observable estimates. Uses the AFI bands.
+    static function fatigueBucket(fBpm, fRef) {
+        var afi = afiFromF(fBpm, fRef);
+        if (afi < Constants.AFI_FRESH_MAX) { return "fresh"; }
+        if (afi < Constants.AFI_BUILDING_MAX) { return "moderate"; }
+        return "heavy";
+    }
+
+    //! Bucket a signed delta (fatigue added) into a coarse magnitude band.
+    static function deltaBucket(deltaBpm, fRef) {
+        var mag = deltaBpm < 0 ? -deltaBpm : deltaBpm;
+        var frac = MathUtil.safeDiv(mag, fRef, 0.0);
+        if (frac < 0.25) { return "small"; }
+        if (frac < 0.6) { return "moderate"; }
+        return "large";
     }
 
     //! Decoupling-only AFI on the common F_ref-equivalent scale (§4.5).
@@ -184,9 +246,14 @@ class AcuteFatigueFilter {
         var r = cfg.rA1;
         // artifact inflation: scale up as artifact approaches the gate
         var artFactor = 1.0 + 4.0 * MathUtil.clamp(artifactPct / cfg.artifactGate, 0.0, 2.0);
-        // rapid-fB inflation: |Δfb| between recomputes
-        var dFb = fbNow - lastFb;
-        if (dFb < 0) { dFb = -dFb; }
+        // rapid-fB inflation: |Δfb| between recomputes (skip the first sample,
+        // where lastFb is still 0 and would fabricate a large spurious Δfb)
+        var dFb = 0.0;
+        if (fbSeen) {
+            dFb = fbNow - lastFb;
+            if (dFb < 0) { dFb = -dFb; }
+        }
+        fbSeen = true;
         var fbFactor = 1.0 + 6.0 * MathUtil.clamp(dFb / 0.1, 0.0, 3.0);   // 0.1 Hz ~ meaningful
         // shared-driver overconfidence -> keep R a LOWER-BOUND-safe inflation (×1.5 floor)
         return r * artFactor * fbFactor * 1.5;
@@ -216,11 +283,31 @@ class AcuteFatigueFilter {
     function afiBlended(decoupPct, artifactPct) {
         var wRr = rrWeight(artifactPct, Constants.ARTIFACT_GOOD, cfg.artifactGate);
         var afiK = afiKalman();
-        var afiD = afiFromDecoupling(decoupPct, Constants.DECOUP_REF);
+        var afiD = afiFromDecoupling(decoupPct, cfg.decoupRef);
         dominantRr = (wRr >= 0.5);
         sourceSwitched = (dominantRr != lastDominantRr);
         lastDominantRr = dominantRr;
-        return blendAfi(afiK, afiD, wRr);
+        var afi = blendAfi(afiK, afiD, wRr);
+        lastAfi = afi;
+
+        // Update the per-athlete AFI baseline only on steady segments (so surges
+        // don't pollute it). A slow EWMA -> "AFI drifting above its own baseline".
+        if (priorDominated) {
+            if (afiBaseline == null) { afiBaseline = afi; }
+            else { afiBaseline += (afi - afiBaseline) / 600.0; }
+            afiBaseCount++;
+        }
+        return afi;
+    }
+
+    //! Positive drift of current AFI above the athlete's own rolling baseline
+    //! (§4.5). 0 until the baseline is established (needs steady warmup). This is
+    //! the per-athlete trigger that keeps the absolute cutoff from being the sole
+    //! gate; parallel to the α1 drift-below-baseline signal.
+    function afiDriftAboveBaseline() {
+        if (afiBaseline == null || afiBaseCount < 60) { return 0.0; }
+        var d = lastAfi - afiBaseline;
+        return (d > 0) ? d : 0.0;
     }
 
     //! AFI uncertainty (std, index points) from the F covariance, scaled to the

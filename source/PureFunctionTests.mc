@@ -164,6 +164,55 @@ module PureFunctionTests {
     }
 
     (:test)
+    function testObservabilityFNonDegenerate(logger) {
+        // §4.3a: F must be observable (non-degenerate Gramian) under the model,
+        // because it couples into both HR and (via −c_F) the α1 channel.
+        var cfg = new Config();
+        var dtHr = 1.0 / cfg.tauHr; var dtA = 1.0 / cfg.tauA; var dtRec = 1.0 / cfg.tauRec;
+        var A = KalmanMath.zeros4x4();
+        A[1][0] = dtHr; A[1][1] = 1.0 - dtHr; A[1][3] = dtHr;
+        A[2][2] = 1.0 - dtA; A[2][3] = -dtA * cfg.cF;
+        A[3][3] = 1.0 - dtRec;
+        var Hrows = [ [0.0,1.0,0.0,0.0], [0.0,0.0,1.0,0.0] ];
+        var r = KalmanMath.observabilityCheck(A, Hrows);
+        return r[:observable] && r[:detGram] > 0.0 && r[:fEnergy] > 0.0;
+    }
+
+    (:test)
+    function testFatigueBucket(logger) {
+        var fresh = AcuteFatigueFilter.fatigueBucket(0.0, 12.0);   // AFI 0
+        var mod = AcuteFatigueFilter.fatigueBucket(6.0, 12.0);     // AFI 50
+        var heavy = AcuteFatigueFilter.fatigueBucket(11.0, 12.0);  // AFI ~92
+        return fresh.equals("fresh") && mod.equals("moderate") && heavy.equals("heavy");
+    }
+
+    (:test)
+    function testDeltaBucket(logger) {
+        var small = AcuteFatigueFilter.deltaBucket(1.0, 12.0);
+        var large = AcuteFatigueFilter.deltaBucket(10.0, 12.0);
+        return small.equals("small") && large.equals("large");
+    }
+
+    (:test)
+    function testRecoveryRelaxesF(logger) {
+        // §4.4 / harness: on a coast (inactive, low power) F must NOT increase.
+        var cfg = new Config();
+        var filt = new AcuteFatigueFilter(cfg);
+        // charge F up first with an active hard effort
+        for (var i = 0; i < 300; i++) {
+            filt.step(cfg.pAeT + 80.0, 160.0, null, 100.0, 0.0, true, true);
+        }
+        var fCharged = filt.fState();
+        // now coast: inactive, no power, and HR dropped out (predict-only) so the
+        // test isolates the charge/decay dynamics from the HR-innovation confound.
+        // κ_d is gated off (inactive) -> F must decay via τ_rec.
+        for (var j = 0; j < 300; j++) {
+            filt.step(0.0, null, null, 100.0, 0.0, false, true);
+        }
+        return filt.fState() < fCharged;
+    }
+
+    (:test)
     function testRespirationDoesNotManufactureFatigue(logger) {
         // harness §2: a rapid-fB excursion inflates R_A1 so F barely moves.
         var cfg = new Config();

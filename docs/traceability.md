@@ -43,6 +43,15 @@ constant with no provenance is a defect. All defaults live in
 | `PROJECTED_AFI` (range) | FatigueMeterView.drawDial | now ± AFI uncertainty | dial §8.1 | Synthesis | n/a | Forecast; **gated on pilot; rendered as a shaded range**, not a hard tick |
 | Feat/Attrition weights | EffortCharacterizer.mc | arbitrary | §8.2 red-typing | Synthesis | n/a | No labeled data, no error rate; **off the advisory critical path** |
 
+**Now live settings (review round 1):** the convention/synthesis values that gate
+live output — `afiFresh`/`afiBuilding` (AFI band), `decoupRef` (blend scale),
+`seedA`/`seedB`/`seedTsbScale` (seeding map), and the Feat/Attrition weights
+(`featWSev`/`featMatchW`/`featBestW`/`attrDriftW`) — are now read from
+`Application.Properties` via `Config`, not hard-coded, so changing the setting
+changes behaviour (honesty rule). The AFI band also fires on a **per-athlete AFI
+drift** above the athlete's own rolling baseline (`afiDriftAboveBaseline`,
+margin `afiDriftMargin`), so the absolute cutoff is not the sole gate.
+
 **Coverage note (for the harness):** every physiological constant referenced in
 `source/` has a row above. The DALE `TAU_ST/TAU_FT` row is included to record that
 those "Validated (VO₂)" constants are **deliberately not** applied to the HR-based
