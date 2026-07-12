@@ -19,38 +19,40 @@ You are an expert Garmin **Connect IQ / Monkey C** developer and exercise-physio
 
 **Layer 1 — Observable primitives** (`PrimitivesCalculator`):
 - Rolling **Normalized Power** (30 s rolling avg of power⁴, then 4th root).
-- Rolling **Efficiency Factor** and **decoupling %** vs a baseline established over minutes 5–15. Thresholds <5 / 5–8 / >8–10% as configurable settings.
+- Rolling **Efficiency Factor** and **decoupling %** vs a baseline established over minutes 5–15, **behind a steadiness gate** (emit only when the window's power CV and coasting fraction are below configurable limits; mark low-confidence otherwise — NP/EF over short windows is unvalidated and noisy on variable terrain). Thresholds <5 / 5–8 / >8–10% as configurable settings.
 - **Intensity-weighted kJ** with weight ramping from 1× below CP to ~2–3× above CP.
-- **DFA-α1** on a **2-minute rolling RR window, recomputed every 5 s, box sizes 4–16 beats, per-box linear detrend**, with a **hard artifact gate at 5%** (configurable, prefer <3%) and a validity flag. Implement DFA correctly (integrate the mean-subtracted series, partition into boxes of size n, least-squares linear detrend per box, RMS across boxes → F(n); α1 = slope of log F(n) vs log n over n∈[4,16]). Profile it; if per-5 s recompute is too heavy, decimate further and document the tradeoff.
-- **Cadence drift** and a simple **W′bal** (Skiba differential) from CP/W′.
+- **DFA-α1** on a **2-minute rolling RR window, recomputed every 5 s, box sizes 4–16 beats, per-box linear detrend**, with a **hard artifact gate at 5%** (configurable, prefer <3%) **AND a stationarity gate** (suppress/down-weight α1 when within-window power CV or coasting fraction exceeds a configurable threshold — a moving window straddling transients violates α1's stationarity assumption) and a validity flag. Implement DFA correctly (integrate the mean-subtracted series, partition into boxes of size n, least-squares linear detrend per box, RMS across boxes → F(n); α1 = slope of log F(n) vs log n over n∈[4,16]). Where feasible derive respiratory frequency (fB) from the RR stream to flag ventilation-driven α1 movement. Profile it; if per-5 s recompute is too heavy, decimate further and document the tradeoff.
+- **Cadence drift** and a simple **W′bal** (Skiba differential) from CP/W′ (**guard: a stale CP/W′ propagates to matches/FeatScore — surface a data-quality caveat**).
 
-**Layer 2 — Acute fatigue Kalman filter** (`AcuteFatigueFilter`):
-- Implement the 4-state filter from white-paper §4 exactly: state `[HR_ss, HR, A1, F]`, the transition equations (including the power→DFA-α1 sigmoid `A1_target` and the **CP-gated fatigue drift F**), and the two linear observation equations. Use the seed/tuning table (§4.4) as defaults, all overridable in settings.
-- Output the **Acute Fatigue Index (AFI, 0–100)** per §4.5, blended with model-free decoupling/α1 drift so it degrades gracefully when RR is poor.
-- Implement the concerning-value band logic (fresh / accumulating / high / severe) with ordered, configurable cutoffs.
+**Layer 2 — Acute fatigue EKF** (`AcuteFatigueFilter`):
+- Implement the **4-state Extended Kalman filter** from white-paper §4 **as revised (Rev 2)**: state `[HR_ss, HR, A1, F]` where `F` is the **residual cardiovascular-drift state** (NOT "the VO₂ slow component" — do not use that label in code or UI). Implement the transition equations **including the α1↔F coupling term `−c_F·F` in the `A1` update** (this is the fusion mechanism — without it, α1 does not inform `F`) and the **graded intensity+duration charge** for `F` (`κ_i·max(0,P−P_AeT) + κ_d`). **Do NOT hard-gate `F` at critical power** — sub-CP drift is real. Use the seed/tuning table (§4.4) as defaults, all overridable in settings.
+- Output the **Acute Fatigue Index (AFI, 0–100)** per §4.5 as an **index/estimate** (never a "measured fatigue" value), blended with model-free decoupling so it degrades gracefully to decoupling-only when RR is poor or α1 calibration fails the R²>0.75 gate.
+- Implement the band logic (fresh / accumulating / high / severe) with ordered, configurable cutoffs. **Verdict gating uses only the per-athlete α1 drift-below-baseline signal; the absolute α1 value is display-only and must not gate any verdict.**
+- Include the **observability guard**: expose `F` and AFI with an uncertainty/confidence indicator, and document in code that on constant-power segments `F` is weakly observable (AFI ≈ smoothed decoupling there).
 
 **Layer 3 — Residual fatigue ledger** (`TrainingLoadLedger`, persistent):
 - Compute ride **TSS** (power) or fall back to **Banister/Edwards TRIMP** (HR).
-- Maintain **CTL (42-day) and ATL (7-day) EWMAs** and **TSB = CTL − ATL** across rides via persistent storage. Implement **uncoupled/EWMA ACWR** as a descriptive ramp warning (>1.5), clearly labeled non-predictive.
+- Maintain **CTL (42-day) and ATL (7-day) EWMAs** and **TSB = CTL − ATL** across rides via persistent storage. **ACWR is OPT-IN and OFF by default** (mathematically criticized — Lolli/Impellizzeri); when enabled, show it only as a plain weekly load-ramp display with the critique linked in-UI, never as a predictive risk score. Prefer a CTL ramp (>5–8 pts/week) as the over-reach cue.
+- **Resolve the Banister female TRIMP coefficient (0.86 vs 0.64) against the 1991 primary, or expose it as a setting** — do not ship an ambiguous hard-coded constant.
 - If resting RR is captured, track **RMSSD against a personal 7-day rolling baseline ± 1 SD** (not a universal cutoff).
 
 **Coupling (Questions 4 & 3):**
 - **Seed** the Layer-2 filter's `F(0)` from the Layer-3 residual state at ride start (white-paper §7) so the ride *starts* partly fatigued when the athlete is carrying load. Record **start-of-ride fatigue** on the same 0–100 scale as AFI.
 - At ride end, record **end-of-ride fatigue** and the **fatigue-added delta**, and fold TSS into the ledger.
-- **Productive-window signal** (§6): fire an amber "window closing — remaining work is mostly fatigue, not stimulus" state only when **≥2 of 3** independent signals agree (intensity-weighted kJ near durability anchor; decoupling >8% after ≥60–90 min; DFA-α1 drift/collapse). Never label it "damage."
+- **Durability advisory** (§6, Rev 2): surface a **descriptive** "durability markers are drifting — remaining work may be mostly fatigue" state drawing on **correlated** markers (intensity-weighted kJ near anchor; decoupling >8% after the steadiness gate and ≥60–90 min; per-athlete α1 drift-below-baseline). **Do NOT call these "independent," do NOT emit an imperative "TURN BACK," and never label it "damage."** Apply thermal suppression to **both** decoupling and α1, and **name the shared confounds in-UI** (heat/dehydration/fuel/altitude) when the advisory fires.
 
 ### Effort characterizer — Feat of Strength vs Attrition (white-paper §8.2)
-- Implement a `EffortCharacterizer` that continuously computes **FeatScore** and **AttritionScore** per white-paper §8.2, and classifies any red state as **Feat of Strength** (bought with output: P≫CP, severe-domain time, W′ matches, in-ride best efforts) or **Attrition** (drift at sub-threshold power past the durability anchor).
+- Implement an `EffortCharacterizer` that continuously computes **FeatScore** and **AttritionScore** per white-paper §8.2, characterizing high-fatigue states as **Feat of Strength** (bought with output: P≫CP, severe-domain time, W′ matches, in-ride best efforts) or **Attrition** (drift at sub-threshold power past the durability anchor).
 - Track **W′ "matches"** (W′bal dropping below a configurable ~20% then recovering) and **in-ride best efforts** (best 1/5/20-min mean-maximal power).
-- The productive-window/turn-back verdict must be **conditioned on this classification**: fire "turn back / ease off" only for Attrition-dominant red, and render Feat-dominant red as **red-with-gold "🏅 Feat of Strength — this is the work"** (not a scold). This is a hard requirement — the user deliberately rides deep into the red and the app must not treat every red as a warning.
+- **This classifier is OFF the verdict critical path (Rev 2).** It has arbitrary weights and no validation, so it must **not gate or suppress** the status band. Show FeatScore/AttritionScore as **raw evidence** that *contextualizes* a red state ("this red is dominated by hard output 🏅" vs "…by drift ⚠"), so a deliberately hard effort is celebrated rather than scolded — but the app must never convert this synthesis-grade guess into an authoritative directive.
 
 ### Display — the single glance screen (white-paper §8.1)
-Build a **large, full-screen** layout (target the Edge 1050 color display) designed to be flipped to a few times per ride for a decision, **not** watched constantly. Top→bottom:
-1. **Verdict banner** (largest): KEEP GOING (green) · PRODUCTIVE — EASE SOON (amber) · EASE OFF / TURN BACK (red); when red, a second line "🏅 Feat of Strength" or "⚠ Attrition."
-2. **AFI dial (0–100)** with green/amber/red arc and three ticks: start / now / projected end.
-3. **Evidence row:** decoupling %, DFA-α1 + quality dot, kJ vs durability-anchor progress bar, W′ matches burned.
+Build a **large, full-screen** layout (target the Edge 1050 color display) designed to be flipped to a few times per ride for a read, **not** watched constantly. Top→bottom:
+1. **Status band** (largest), **carrying a persistent "advisory · not a validated measurement" tag**: descriptive states **FRESH / PRODUCTIVE** (green) · **FATIGUE BUILDING — EASE SOON** (amber) · **DURABILITY MARKERS DRIFTING** (red); when red, a second line "🏅 Feat of Strength" or "⚠ Attrition" as characterization, **not a command**. No imperative "TURN BACK" text.
+2. **AFI dial (0–100)** with green/amber/red arc and three ticks: start / now / projected end — labeled an *index*.
+3. **Evidence row (at least equal visual weight to the status band — it is the validated part):** decoupling %, DFA-α1 + quality dot, kJ vs durability-anchor progress bar, W′ matches burned.
 4. **Feats strip:** best 5-min power, biggest climb kJ, matches burned, TSB/start-fatigue context.
-5. **Data-quality footer:** RR artifact %/α1 validity; decoupling-only fallback shown when RR is poor.
+5. **Data-quality footer:** RR artifact %/α1 validity + stationarity/steadiness status; decoupling-only fallback shown when RR is poor or α1 uncalibrated.
 - **Color must always be reinforced with text/icon (never color alone).**
 
 ### Storage — markers through the ride + session results (white-paper §8.3)
@@ -63,9 +65,9 @@ Build a **large, full-screen** layout (target the Edge 1050 color display) desig
 Expose: FTP, CP, W′, HR_max, HR_rest, sex, current CTL/ATL seed; all filter τ/κ/gains and Q/R; decoupling and TSB band cutoffs; DFA artifact threshold; unit preferences. Ship documented defaults from the white paper.
 
 ### Calibration & honesty (hard requirements)
-- Until the **threshold-calibration ride** and **durability-calibration** (white-paper §10) have run, label AFI, the productive-window signal, and start/end fatigue as **"uncalibrated — estimate only."**
-- Provide a **calibration mode** that fits the personal power→DFA-α1 sigmoid (accept only R²>0.75), personal AeT/AnT power, and the durability kJ anchor + κ.
-- Every displayed value that derives from a "convention" or "synthesis" (see white-paper §9 provenance table) must be traceable in code comments to its status, and must not be presented as clinically meaningful. Include the disclaimer that FatigueMeter is not a medical device.
+- Until the **threshold-calibration ride** and **durability-calibration** (white-paper §10) have run, label AFI, the durability advisory, and start/end fatigue as **"uncalibrated — estimate only."** The fused AFI/advisory must **always** carry a persistent "advisory · not a validated measurement" tag (calibration tunes threshold-crossings and self-consistency; it does **not** validate the fatigue magnitude — there is no on-bike fatigue ground truth, white-paper §10).
+- Provide a **calibration mode** that fits the personal power→DFA-α1 sigmoid (accept only R²>0.75, else decoupling-only + α1 display-only), personal AeT/AnT power, and the durability kJ anchor + κ terms.
+- Every displayed value that derives from a "convention" or "synthesis" (see white-paper §9 provenance table) must be traceable in code comments to its status, and must not be presented as clinically meaningful. Reflect the **evidence-strength** column, not just extraction confidence. Include the disclaimer that FatigueMeter is not a medical device, and that the within-ride α1/fatigue use is unvalidated on outdoor variable-power rides.
 
 ### Engineering requirements
 - Clean, commented Monkey C; clear module boundaries (`PrimitivesCalculator`, `AcuteFatigueFilter`, `EffortCharacterizer`, `TrainingLoadLedger`, `FitLogger` (FitContributor record/session fields), `SessionStore` (persistent Session Results + rolling history), `FatigueMeterView`, `FatigueMeterApp`, settings). No blocking work in `compute()`; keep the 1 Hz path light and budget the DFA-α1 recompute.
