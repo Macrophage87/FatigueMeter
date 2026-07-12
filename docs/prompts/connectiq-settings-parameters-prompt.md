@@ -155,20 +155,20 @@ without following the rule for that parameter.
 | # | Parameter | Tier | How to generate the value |
 |---|---|---|---|
 | 1 | `FTP (W)` | A | Platform FTP if present; else ≈ 0.95 × best 20-min power, or best ~40–60-min normalized power. Round to nearest watt. |
-| 2 | `Critical Power (W)` | A | Fit the 2-parameter CP model `P(t) = W′/t + CP` to ≥2 maximal efforts (e.g. 3–12 min); `CP` is the asymptote. If no curve, seed CP ≈ FTP. |
-| 3 | `W′ (J)` | A | The `W′` term from the **same** CP-model fit as #2 (anaerobic work capacity). If unfittable, leave default (20000). |
+| 2 | `Critical Power (W)` | A | Fit the 2-parameter CP model `P(t) = W′/t + CP` to ≥2 maximal efforts (e.g. 3–12 min); `CP` is the asymptote. If no curve, seed CP ≈ FTP. Round to a whole watt (`number` type) and enforce `CP ≤ FTP` (see consistency pass). |
+| 3 | `W′ (J)` | A | The `W′` term from the **same** CP-model fit as #2 (anaerobic work capacity), in **Joules** (`20000 J = 20 kJ` — a platform reporting kJ must be ×1000). Round to a whole Joule (`number` type); must be `> 0`. If unfittable, leave default (20000). |
 | 4 | `HR max (bpm)` | A | Highest reliable HR observed in the record (max-effort intervals / field test), not an age formula if real data exists. |
 | 5 | `HR rest (bpm)` | A | Lowest stable resting/morning HR from wellness data. |
 | 6 | `Sex` | B | Direct from profile — set `sexFemale = true` for female, `false` for male. |
 | 7 | `CTL seed` | A | The athlete's **current CTL / "Fitness"** at install time, from the training record. Clamp 0–200. |
 | 8 | `ATL seed` | A | The athlete's **current ATL / "Fatigue"** at install time. Clamp 0–200. |
 | 9–15 | `τ_HR (s)` … `F_ref (bpm)` | C | Acute Kalman time-constants and intensity/duration charges — **leave at default.** Calibration-only. |
-| 16 | `Decoupling OK %` | C→A | Default 5%. May lower toward the athlete's own typical early-ride decoupling **only if** a stable personal baseline exists; otherwise default. |
-| 17 | `Decoupling caution %` | C→A | Default 8%. Keep OK < caution < high; personalize only alongside #16 with real baseline data. |
-| 18 | `Decoupling high %` | C→A | Default 10%. Same ordering constraint as #16/#17. |
+| 16 | `Decoupling OK %` | C | Leave default (5%). The app already scores decoupling as **drift vs. the athlete's own minutes-5–15 baseline** (StatusEvaluator / PrimitivesCalculator), so these bands apply to *personalized drift* — re-deriving an absolute band would double-count the baseline. |
+| 17 | `Decoupling caution %` | C | Leave default (8%). Applied to personalized drift; keep OK < caution < high. |
+| 18 | `Decoupling high %` | C | Leave default (10%). Applied to personalized drift; same ordering. |
 | 19 | `DFA artifact gate %` | C | Data-quality gate — leave default (5%). |
 | 20 | `Durability kJ anchor` | A | The kJ at which the athlete's decoupling historically starts to drift (from long-ride history); else a typical hard-long-ride total. Clamp 800–4000. |
-| 21 | `TRIMP female coeff (0.86/0.64)` | B | Sex-driven: `0.86` (default) unless you deliberately adopt the 0.64 variant; tie to `sexFemale`. |
+| 21 | `TRIMP female coeff (0.86/0.64)` | C | Leave default `0.86` — this is a **convention constant, not sex-driven** (its value does not change with the athlete's sex; the code only *applies* it when `sexFemale = true`, males use the `0.64·e^{1.92x}` form). Switch to `0.64` only as a deliberate literature choice. |
 | 22 | `AFI fresh cutoff` | C | `F_ref`-dependent convention — calibration-only; leave default. |
 | 23 | `AFI building cutoff` | C | As #22 — leave default (keep fresh < building). |
 | 24 | `AFI drift margin` | C | As #22 — leave default. |
@@ -182,6 +182,21 @@ without following the rule for that parameter.
 | 41 | `Numeric AFI unlocked (pilot)` | C | Gated behind the criterion-validity pilot — leave `false`. |
 | 42 | `Ship AFI number pre-pilot (override)` | C | Honesty override — leave `false`. |
 | 43 | `Metric units` | B | From profile/locale — `true` for metric, `false` for imperial. |
+
+**Type rounding.** `ftp`, `cp`, `wPrime`, `hrMax`, `hrRest` are `number` (integer) — round
+every generated value to a whole number; never emit a fractional watt/Joule/bpm (a CP or
+W′ from a curve fit **must** be rounded). `ctlSeed` / `atlSeed` are `float`, so a decimal
+is fine there.
+
+**Consistency pass (run after generating all Tier-A values, before emitting).** The Tier-A
+parameters are derived independently, so assert these physiological orderings and repair
+any violation by **keeping the more directly-measured value and falling the other back to
+its default** (report the fallback):
+- `CP ≤ FTP` — CP above FTP is physiologically wrong and breaks the model's `P_AeT` (drift)
+  vs `CP` (severe-domain) split. If violated, trust the measured FTP and re-seed `CP ≈ FTP`.
+- `HR rest < HR max`.
+- `W′ > 0`.
+- `TSB overreach band < TSB fresh band` (item 27 < item 26).
 
 **Output contract for the generation step:** for every parameter emit `id`, the chosen
 value, and a one-line reason keyed to its tier — e.g. `ftp = 268 (Tier A: 0.95 × 282 W
