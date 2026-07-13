@@ -54,8 +54,14 @@ module Constants {
     // denominator is the power AT HR_max (~threshold): (190-50)/~310 ~= 0.45.
     // Synthesis / hand-set (§9) and a live setting - calibrate per athlete.
     const G_P = 0.45;        // static power->HR gain, bpm/W
-    const SIG_A0 = 1.1;      // A1_target sigmoid upper
-    const SIG_A1 = 0.6;      // A1_target sigmoid span
+    // A1_target sigmoid. The white paper says it passes through the α1=0.75 AeT
+    // anchor at P_AeT, but its stated a0/a1 = 1.1/0.6 give a midpoint value of
+    // a0 − a1/2 = 0.80, NOT 0.75 (the model-consistency harness flagged the
+    // ~0.05 drift between this population prior and the calibrated 0.75 crossing).
+    // a0=1.0, a1=0.5 fixes it: midpoint = 1.0 − 0.25 = 0.75 at P_AeT, with clean
+    // asymptotes 1.0 (rest) and 0.5 (the AnT anchor). Synthesis / settings (§9).
+    const SIG_A0 = 1.0;      // A1_target sigmoid upper asymptote (α1 at rest)
+    const SIG_A1 = 0.5;      // A1_target sigmoid span (upper − lower asymptote)
     const SIG_S = 0.02;      // A1_target sigmoid slope (1/W)
     // Charge dynamics: dF/dt = charge − F/τ_rec, so steady state F_ss = charge·τ_rec
     // and F(t) = F_ss·(1 − e^(−t/τ_rec)).

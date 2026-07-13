@@ -29,7 +29,7 @@ constant with no provenance is a defect. All defaults live in
 | `G_P` | Constants.mc + prop `gP` | 0.15 bpm/W | Kalman seeds §4.4 | Synthesis | n/a | Static-gain estimate ≈(HRmax−HRrest)/Pmax |
 | `Q_* / R_HR / R_A1 / P0_*` | Constants.mc + props | see file | Kalman Q/R §4.4 | Synthesis | n/a | Hand-set; no on-bike ground truth; R inflated (correlated noise) |
 | `AFI_FRESH/BUILDING/HIGH_MAX` | Constants.mc | 30 / 60 / 85 | AFI bands §4.5 | Convention | n/a | `F_ref`-dependent absolute-in-disguise; also fires on per-athlete AFI drift; calibrate |
-| `SIG_A0 / SIG_A1 / SIG_S` | Constants.mc + props `a0/a1/sigmoidS` | 1.1 / 0.6 / 0.02 | A1_target map | PMC11280911 | High | Population map **not universal** (44% |r|>0.7); decoupling-only fallback on fit failure |
+| `SIG_A0 / SIG_A1 / SIG_S` | Constants.mc + props `a0/a1/sigmoidS` | 1.0 / 0.5 / 0.02 | A1_target map | PMC11280911 | High | Population map **not universal** (44% |r|>0.7); a0/a1 set so the midpoint crosses the **α1=0.75 AeT anchor** at P_AeT (white paper's 1.1/0.6 gave 0.80 — harness-flagged); decoupling-only fallback on fit failure |
 | `DFA_R2_GATE` | Constants.mc / CalibrationFit.mc | 0.75 | calibration §10 | white-paper §10 | n/a | Fit-acceptance gate; below → decoupling-only, α1 display-only |
 | `WPRIME_MATCH_FRAC` | Constants.mc / EffortCharacterizer.mc | 0.20 | W′ match §8.2 | Skiba | High | Established; depends on good CP/W′ (stale-CP caveat surfaced) |
 | `TRIMP_MALE_COEFF/EXP` | Constants.mc / TrainingLoadLedger.mc | 0.64 / 1.92 | Banister TRIMP | references.md (Banister) | High | Male form unambiguous |
