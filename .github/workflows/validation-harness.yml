@@ -37,11 +37,18 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # The report runs the full assertion catalog ONCE and is the build gate
+      # (non-zero exit on any HARD/STRUCTURAL/ADVERSARIAL/HONESTY/CALIBRATION
+      # failure). We then run only the FAST pytest layers (hypothesis property
+      # tests + CSV ingestion) — test_catalog.py re-runs the same slow catalog and
+      # enforces the identical tier contract, so it's redundant with the report in
+      # CI and is skipped here to keep the pipeline quick (run it locally via
+      # `pytest -q` for per-check granularity).
       - name: Model-consistency report (gates on HARD/STRUCTURAL failures)
         run: python run_report.py --md report.md
 
-      - name: Pytest — tier contract + hypothesis property layer + ingestion
-        run: python -m pytest -q
+      - name: Pytest — hypothesis property layer + ingestion (fast)
+        run: python -m pytest tests/test_properties.py tests/test_ingestion.py -q
 
       - name: Upload the human-readable report
         if: always()
