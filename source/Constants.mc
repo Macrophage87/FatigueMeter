@@ -112,6 +112,7 @@ module Constants {
     const DFA_BOX_MIN = 4;         // box sizes 4..16 beats
     const DFA_BOX_MAX = 16;
     const DFA_R2_GATE = 0.75;      // calibration sigmoid fit acceptance (§10)
+    const RR_STALE_S = 10;         // no fresh RR for this long -> α1 unavailable (§8.4 staleness timer)
 
     // ---- Decoupling / steadiness gate (white paper §3.1) ----
     const EF_BASELINE_START_S = 300;   // baseline window minutes 5..15
