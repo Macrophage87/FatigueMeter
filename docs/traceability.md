@@ -26,7 +26,7 @@ constant with no provenance is a defect. All defaults live in
 | `KAPPA_I / KAPPA_D` | Constants.mc + props | 1.45e-4 / 2.8e-3 | Kalman seeds §4.4 | Synthesis | n/a | Hand-set; re-derived for τ_rec-drained dynamics; `κ_d` active-gated |
 | `C_F` | Constants.mc + prop `cF` | 0.0167 | Kalman seeds §4.4 (`c_F`) | Synthesis | n/a | Unvalidatable cross-signal gain (bpm⇔α1); inherits F_ref/sigmoid weakness; 0.2 anchor possibly ~2× low vs Rogers 2025 |
 | `F_REF` | Constants.mc + prop `fRef` | 12 bpm | AFI scaling §4.5 | Synthesis | n/a | **AFI linear in 1/F_ref** — sets whole scale; sensitivity surfaced |
-| `G_P` | Constants.mc + prop `gP` | 0.15 bpm/W | Kalman seeds §4.4 | Synthesis | n/a | Static-gain estimate ≈(HRmax−HRrest)/Pmax |
+| `G_P` | Constants.mc + prop `gP` | 0.45 bpm/W | Kalman seeds §4.4 | Synthesis | n/a | Static-gain estimate ≈(HRmax−HRrest)/P_at_HRmax; white paper's ≈0.15 (P_max as sprint peak) saturated AFI — harness-flagged, corrected to ~0.45 (denominator = power at HR_max ≈ threshold) |
 | `Q_* / R_HR / R_A1 / P0_*` | Constants.mc + props | see file | Kalman Q/R §4.4 | Synthesis | n/a | Hand-set; no on-bike ground truth; R inflated (correlated noise) |
 | `AFI_FRESH/BUILDING/HIGH_MAX` | Constants.mc | 30 / 60 / 85 | AFI bands §4.5 | Convention | n/a | `F_ref`-dependent absolute-in-disguise; also fires on per-athlete AFI drift; calibrate |
 | `SIG_A0 / SIG_A1 / SIG_S` | Constants.mc + props `a0/a1/sigmoidS` | 1.0 / 0.5 / 0.02 | A1_target map | PMC11280911 | High | Population map **not universal** (44% |r|>0.7); a0/a1 set so the midpoint crosses the **α1=0.75 AeT anchor** at P_AeT (white paper's 1.1/0.6 gave 0.80 — harness-flagged); decoupling-only fallback on fit failure |
