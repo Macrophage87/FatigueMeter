@@ -24,8 +24,8 @@
     <property id="kappaD"         type="float">0.0028</property>
     <property id="cF"             type="float">0.0167</property>
     <property id="fRef"           type="float">12.0</property>
-    <property id="a0"             type="float">1.1</property>
-    <property id="a1"             type="float">0.6</property>
+    <property id="a0"             type="float">1.0</property>
+    <property id="a1"             type="float">0.5</property>
     <property id="sigmoidS"       type="float">0.02</property>
     <property id="gP"             type="float">0.45</property>
     <property id="qHr"            type="float">0.5</property>
