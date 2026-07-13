@@ -217,3 +217,62 @@ The literature supplies every *piece* but no assembled whole:
 - **Durability-drift numbers** (~6–10% VT1 decline after ~1,400–1,680 kJ; intensity-driven) that quantify the closing of the productive window.
 
 The **gap** is the fusion: no published model estimates the slow component (or fatigue, or "damage") directly from power + HR + HRV, and no framework marks the intra-ride productive-to-damaging transition. FatigueMeter composes the validated pieces into that estimator; the [white paper](white-paper.md) specifies how, and both fused estimators must be calibrated against the user's own labeled rides before their outputs are trusted.
+
+---
+
+## Appendix — Figures: how each reviewed marker behaves with increasing fatigue
+
+The figures below summarize the **direction and shape** each fatigue marker takes
+as fatigue accumulates, as established by the evidence reviewed above and rendered
+through the [white paper](white-paper.md)'s model equations. They are shared with
+[white-paper.md Appendix A](white-paper.md#appendix-a--figures-modeled-behavior-of-each-fatigue-variable);
+each is provided in **vector (`.svg`)** and **raster (`.png`)** form under
+[`figures/`](figures/) (regenerate with `python docs/figures/generate_figures.py`).
+
+> **Evidence-strength reminder.** The individually *validated* pieces are the
+> observable primitives (§3–§4: aerobic decoupling, the DFA-α1 = 0.75/0.5 anchors,
+> durability-drift magnitudes) and the CTL/ATL/TSB accounting (§7). The **fused
+> AFI is a synthesis** with no external-criterion validation — read the AFI/`F`
+> panels as the model's *construction*, not as measured fatigue.
+
+**Overview**
+![How each fatigue marker behaves with increasing fatigue](figures/00_overview.png)
+*Vector: [SVG](figures/00_overview.svg)*
+
+**DFA-α1 (§4).** Falls with intensity through the aerobic (0.75) and anaerobic
+(0.50) HR-anchored thresholds, and drifts **below its baseline-for-power** with
+within-ride fatigue (Rogers/Gronwald; the absolute <0.5 collapse is running-derived
+and retired for cycling).
+![DFA-alpha1 power map and fatigue drift](figures/03_DFA_alpha1.png) · *[SVG](figures/03_DFA_alpha1.svg)*
+
+**Aerobic decoupling % / Efficiency Factor (§3).** Decoupling rises (EF falls) as
+cardiovascular drift lifts HR at fixed power; validated on steady efforts, low-SNR
+sub-threshold (Barsumyan 2026 — mean ≈ 2 %, SD ≈ mean at 75 % FTP).
+![Aerobic decoupling percent vs fatigue](figures/04_decoupling.png) · *[SVG](figures/04_decoupling.svg)* · ![Efficiency Factor vs fatigue](figures/05_efficiency_factor.png) · *[SVG](figures/05_efficiency_factor.svg)*
+
+**HR drift & cadence decline (§3).** The raw cardiovascular drift (`HR = HR_ss +
+F`) and its ~0.6 %-decoupling-per-rpm cadence corroborator.
+![HR at fixed power vs fatigue](figures/06_hr_drift.png) · *[SVG](figures/06_hr_drift.svg)* · ![Cadence drift vs fatigue](figures/07_cadence_drift.png) · *[SVG](figures/07_cadence_drift.svg)*
+
+**Intensity-weighted kJ & durability drift (§7.2).** The durability clock
+accumulates toward the ~1,400–1,680 kJ regime where VT1/decoupling drift ~6–10 %
+(Maunder/Stevens); durability decline is **intensity-driven**, not raw volume.
+![Intensity-weighted kJ durability clock](figures/09_kj_durability_clock.png) · *[SVG](figures/09_kj_durability_clock.svg)*
+
+**W′bal & matches (§8).** Severe-domain reserve depletes in a sawtooth; dips below
+20 % then recovery are "matches" (Skiba differential).
+![W-prime balance and matches](figures/08_wprime_bal.png) · *[SVG](figures/08_wprime_bal.svg)*
+
+**CTL / ATL / TSB & resting RMSSD (§7.1).** Residual load: TSB goes negative under
+a build block (ATL leads CTL); resting RMSSD declines below the personal −1 SD
+band under sustained overreaching (personal baseline, not a universal cutoff).
+![CTL ATL TSB](figures/10_ctl_atl_tsb.png) · *[SVG](figures/10_ctl_atl_tsb.svg)* · ![RMSSD vs baseline](figures/11_rmssd_baseline.png) · *[SVG](figures/11_rmssd_baseline.svg)*
+
+**Fused acute state — AFI & `F` (§5–§6, synthesis).** The Kalman drift state `F`
+and the derived `AFI = 100·clamp(F/F_ref)` — the *novel* layer, shown as the
+model's construction and explicitly **not** externally validated.
+![F drift state](figures/01_F_drift_state.png) · *[SVG](figures/01_F_drift_state.svg)* · ![AFI index](figures/02_AFI_index.png) · *[SVG](figures/02_AFI_index.svg)*
+
+**Feat vs Attrition (§7.2).** Two flavours of high-fatigue "red" — output-bought
+vs drift-bought — used as context, not a gate.
+![FeatScore vs AttritionScore](figures/12_feat_vs_attrition.png) · *[SVG](figures/12_feat_vs_attrition.svg)*
