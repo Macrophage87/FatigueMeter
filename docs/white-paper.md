@@ -127,9 +127,9 @@ A1_meas(k) = A1(k) + v_A          # large R: DFA-α1 is slow and noisy
 | τ_HR | 30 s | HR kinetics |
 | τ_A | 90 s | DFA-α1 responds slowly |
 | τ_rec | 900 s | within-ride partial recovery |
-| g_P | ≈(HR_max−HR_rest)/P_max ≈ 0.15 bpm/W | static gain |
+| g_P | ≈(HR_max−HR_rest)/P_at_HRmax ≈ **0.45** bpm/W | static gain (**Rev 3 correction:** the earlier ≈0.15 took P_max as a ~930 W sprint peak, so HR_ss underestimated fresh HR by ~50 bpm and F/AFI saturated on any endurance ride — the model-consistency harness caught this; the denominator is the power **at HR_max** ≈ threshold ≈ 310 W) |
 | CP, P_AeT | from athlete (P_AeT ≈ 0.75·FTP) | pull FTP/CP from intervals.icu (may be **stale — propagates to W′bal, FeatScore, advisory**) |
-| a0, a1, s | 1.1, 0.6, 0.02/W | sigmoid through α1=0.75 at P_AeT (**population fiction for many riders — see caveat**) |
+| a0, a1, s | **1.0, 0.5**, 0.02/W | sigmoid through α1=0.75 at P_AeT (**Rev 3 correction:** the earlier 1.1/0.6 give a midpoint of a0−a1/2 = **0.80**, not the 0.75 AeT anchor the row claims — harness-flagged; 1.0/0.5 crosses 0.75 at P_AeT with clean asymptotes 1.0 rest / 0.5 AnT) (**population fiction for many riders — see caveat**) |
 | κ_i | tuned so 30 min at P_AeT+80 W lifts F ≈ 8–10 bpm | intensity charge |
 | κ_d | small, e.g. F rises ~2–3 bpm over 2 h at Z2 | duration/thermal charge |
 | c_F | tuned so F ≈ F_ref pulls α1 ~0.2 below its power-predicted value | α1↔F coupling gain |
