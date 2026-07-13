@@ -94,7 +94,7 @@
 
     <!-- Filter gains & noise (advanced; synthesis-grade — white paper §4.4) -->
     <setting propertyKey="@Properties.gP" title="@Strings.SetGp">
-        <settingConfig type="numeric" min="0.05" max="0.4"/>
+        <settingConfig type="numeric" min="0.1" max="0.9"/>
     </setting>
     <setting propertyKey="@Properties.a0" title="@Strings.SetA0">
         <settingConfig type="numeric" min="0.8" max="1.5"/>

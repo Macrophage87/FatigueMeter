@@ -117,10 +117,13 @@ module PureFunctionTests {
 
     (:test)
     function testA1TargetFalling(logger) {
-        // sigmoid crosses ~0.75 at P_AeT and falls with power
-        var atAet = AcuteFatigueFilter.a1Target(240.0, 240.0, 1.1, 0.6, 0.02);
-        var high = AcuteFatigueFilter.a1Target(360.0, 240.0, 1.1, 0.6, 0.02);
-        return near(atAet, 0.8, 0.06) && high < atAet;
+        // The A1_target sigmoid must cross the 0.75 AeT anchor AT P_AeT and fall
+        // with power. Use the shipped a0/a1 (1.0/0.5) so this validates the
+        // CORRECTED sigmoid, not the retired 1.1/0.6 (which crossed 0.80).
+        var cfg = new Config();
+        var atAet = AcuteFatigueFilter.a1Target(cfg.pAeT, cfg.pAeT, cfg.a0, cfg.a1, cfg.sigmoidS);
+        var high = AcuteFatigueFilter.a1Target(cfg.pAeT + 120, cfg.pAeT, cfg.a0, cfg.a1, cfg.sigmoidS);
+        return near(atAet, 0.75, 0.001) && high < atAet;
     }
 
     (:test)
@@ -134,6 +137,29 @@ module PureFunctionTests {
         }
         var res = DfaAlpha1.compute(rr, 4, 16);
         return res[0] > 0.5 && MathUtil.isFinite(res[0]);
+    }
+
+    (:test)
+    function testRrStalenessMarksAlpha1Unavailable(logger) {
+        // §8.4 staleness timer: with fresh RR, α1 is usable; once RR has been
+        // silent for > RR_STALE_S the α1 tile must go UNAVAILABLE (not keep
+        // emitting a stale value off the aged buffer).
+        var cfg = new Config();
+        var prims = new PrimitivesCalculator(cfg);
+        var t = 0;
+        for (var s = 0; s < 130; s++) {          // ~130 s of gently-varying RR
+            t += 1;
+            var a = 560 + (t * 13) % 80;         // 560..639 ms, low-artifact variation
+            var b = 560 + (t * 29) % 80;
+            prims.update(200, 130, 90, [a, b], t);
+        }
+        var withRr = prims.alpha1Metric();       // fresh RR -> usable
+        for (var s = 0; s < 15; s++) {           // RR goes silent for > 10 s
+            t += 1;
+            prims.update(200, 130, 90, null, t);
+        }
+        var stale = prims.alpha1Metric();        // must now be unavailable
+        return withRr.isUsable() && !stale.isPresent();
     }
 
     (:test)
@@ -214,18 +240,22 @@ module PureFunctionTests {
 
     (:test)
     function testRespirationDoesNotManufactureFatigue(logger) {
-        // harness §2: a rapid-fB excursion inflates R_A1 so F barely moves.
+        // harness §2: isolate the α1 channel — two filters with IDENTICAL power/HR
+        // (so the HR-driven F is identical), differing only in fB. With rapid fB,
+        // R_A1 inflates so the α1-below-target excursion moves F LESS than with
+        // stable fB.
         var cfg = new Config();
-        var filt = new AcuteFatigueFilter(cfg);
-        var a1 = AcuteFatigueFilter.a1Target(cfg.pAeT, cfg.pAeT, cfg.a0, cfg.a1, cfg.sigmoidS);
-        var m = Signals.Metric.ok(a1 - 0.3, 1.0);
-        var f0 = filt.fState();
-        var fbNow = 0.2;
+        var stable = new AcuteFatigueFilter(cfg);
+        var rapid = new AcuteFatigueFilter(cfg);
+        var a1v = AcuteFatigueFilter.a1Target(cfg.pAeT, cfg.pAeT, cfg.a0, cfg.a1, cfg.sigmoidS) - 0.3;
+        var m = Signals.Metric.ok(a1v, 1.0);
+        var fb = 0.25;
         for (var i = 0; i < 60; i++) {
-            fbNow += 0.15;                       // rapidly changing respiration
-            filt.step(cfg.pAeT, 140.0, m, 0.0, fbNow, true, true);
+            var fbRapid = fb + 0.15;             // large |Δfb| every step
+            stable.step(cfg.pAeT, 140.0, m, 0.0, 0.25, true, true);
+            rapid.step(cfg.pAeT, 140.0, m, 0.0, fbRapid, true, true);
+            fb = fbRapid;
         }
-        // With inflated R_A1 the F rise stays small relative to the coupled case.
-        return (filt.fState() - f0) < 3.0;
+        return rapid.fState() < stable.fState();
     }
 }

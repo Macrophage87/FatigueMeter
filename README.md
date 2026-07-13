@@ -25,6 +25,25 @@ This repository currently holds the **research and design layer**. It is not yet
 5. **Store the markers through the ride and roll them into a session result** (via FIT developer fields + persistent storage) for easy comparison across rides.
 6. **Characterize *why* the athlete is in the red** — distinguish a **Feat of Strength** (extreme fatigue bought with real output: big efforts, W′ "matches," power PRs) from **Attrition** (fatigue from drift/hole-digging), so a deliberately hard day is celebrated rather than scolded. Green/amber/red is retained, with a gold accent for feats of strength.
 
+## Modeled behavior of each fatigue variable
+
+How each fatigue variable is modeled to behave **as fatigue increases** — the
+acute drift state and index, the Layer-1 primitives, the residual-load
+accounting, and the effort characterization. Curves are computed from the
+white-paper model equations (see [`docs/figures/`](docs/figures/), regenerate with
+`python docs/figures/generate_figures.py`), and are provided in both **vector
+(SVG)** and **raster (PNG)** form.
+
+![Modeled behavior of each fatigue variable with increasing fatigue](docs/figures/00_overview.png)
+
+Full-size, per-variable figures with equations and evidence notes are in
+[white paper Appendix A](docs/white-paper.md#appendix-a--figures-modeled-behavior-of-each-fatigue-variable)
+and the [literature-review appendix](docs/literature-review.md#appendix--figures-how-each-reviewed-marker-behaves-with-increasing-fatigue).
+
+> These are **illustrative shapes, not calibrated measurements** — the fused AFI
+> and durability advisory are synthesis-grade and unvalidated against any external
+> fatigue criterion (white paper §10).
+
 ## Repository structure
 
 ```
@@ -34,6 +53,7 @@ FatigueMeter/
     ├── literature-review.md                    ← the full, cited literature review
     ├── white-paper.md                          ← the design white paper (model spec, metrics, thresholds)
     ├── references.md                           ← consolidated bibliography with verification status
+    ├── figures/                                ← fatigue-variable behavior figures (SVG + PNG) + generator
     └── prompts/
         ├── connectiq-app-generation-prompt.md  ← LLM prompt to generate the Connect IQ app
         └── scientific-validation-prompt.md     ← LLM prompt for a scientific-consistency validation scheme

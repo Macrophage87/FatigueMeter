@@ -32,6 +32,7 @@ class PrimitivesCalculator {
 
     // ---- DFA cadence ----
     hidden var lastDfaTime;
+    hidden var lastRrTime;     // elapsed when RR last arrived (§8.4 staleness timer)
     hidden var cachedAlpha1;   // [alpha, r2, artifact%, fb]
     hidden var lastFb;
 
@@ -55,6 +56,7 @@ class PrimitivesCalculator {
         kjAboveCpAcc = 0.0;
         wBal = config.wPrime;
         lastDfaTime = -999;
+        lastRrTime = -9999;
         cachedAlpha1 = [0.0, 0.0, 100.0, 0.0];
         lastFb = 0.0;
         elapsed = 0;
@@ -166,12 +168,20 @@ class PrimitivesCalculator {
                 var rrv = rrIntervals[i];
                 if (rrv != null && rrv > 250 && rrv < 2500) {   // physiologic RR bounds (ms)
                     rrBuf.push(rrv);
+                    lastRrTime = elapsed;
                 }
             }
         }
         if (elapsed - lastDfaTime >= Constants.DFA_RECOMPUTE_S) {
             lastDfaTime = elapsed;
             recomputeDfa();
+        }
+        // §8.4 staleness timer: once RR has been silent for RR_STALE_S, stop
+        // emitting a stale α1 off the aged buffer — mark it unavailable so the
+        // filter drops the α1 update and the tile greys, rather than freezing a
+        // stale-confident value.
+        if (elapsed - lastRrTime > Constants.RR_STALE_S) {
+            cachedAlpha1 = [0.0, 0.0, 100.0, 0.0];
         }
     }
 

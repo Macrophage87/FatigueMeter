@@ -46,9 +46,22 @@ module Constants {
     const TAU_HR = 30.0;     // HR kinetics
     const TAU_A = 90.0;      // α1 responds slowly
     const TAU_REC = 900.0;   // within-ride partial recovery — UNSOURCED engineering guess
-    const G_P = 0.15;        // static power->HR gain ≈ (HRmax-HRrest)/Pmax, bpm/W
-    const SIG_A0 = 1.1;      // A1_target sigmoid upper
-    const SIG_A1 = 0.6;      // A1_target sigmoid span
+    // Static power->HR gain: HR_ss = HR_rest + G_P*P must ~= the FRESH HR the
+    // power elicits, else F absorbs a static-gain error and AFI saturates. The
+    // model-consistency harness flagged the white paper's =~0.15 (which implies
+    // P_max~=930 W, a sprint peak) as producing a saturated AFI on a plain Z2
+    // ride, violating §4.4's own "long Z2 -> moderate" requirement. The correct
+    // denominator is the power AT HR_max (~threshold): (190-50)/~310 ~= 0.45.
+    // Synthesis / hand-set (§9) and a live setting - calibrate per athlete.
+    const G_P = 0.45;        // static power->HR gain, bpm/W
+    // A1_target sigmoid. The white paper says it passes through the α1=0.75 AeT
+    // anchor at P_AeT, but its stated a0/a1 = 1.1/0.6 give a midpoint value of
+    // a0 − a1/2 = 0.80, NOT 0.75 (the model-consistency harness flagged the
+    // ~0.05 drift between this population prior and the calibrated 0.75 crossing).
+    // a0=1.0, a1=0.5 fixes it: midpoint = 1.0 − 0.25 = 0.75 at P_AeT, with clean
+    // asymptotes 1.0 (rest) and 0.5 (the AnT anchor). Synthesis / settings (§9).
+    const SIG_A0 = 1.0;      // A1_target sigmoid upper asymptote (α1 at rest)
+    const SIG_A1 = 0.5;      // A1_target sigmoid span (upper − lower asymptote)
     const SIG_S = 0.02;      // A1_target sigmoid slope (1/W)
     // Charge dynamics: dF/dt = charge − F/τ_rec, so steady state F_ss = charge·τ_rec
     // and F(t) = F_ss·(1 − e^(−t/τ_rec)).
@@ -99,6 +112,7 @@ module Constants {
     const DFA_BOX_MIN = 4;         // box sizes 4..16 beats
     const DFA_BOX_MAX = 16;
     const DFA_R2_GATE = 0.75;      // calibration sigmoid fit acceptance (§10)
+    const RR_STALE_S = 10;         // no fresh RR for this long -> α1 unavailable (§8.4 staleness timer)
 
     // ---- Decoupling / steadiness gate (white paper §3.1) ----
     const EF_BASELINE_START_S = 300;   // baseline window minutes 5..15

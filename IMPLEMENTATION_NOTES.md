@@ -119,6 +119,33 @@ It is a required deliverable of `docs/prompts/connectiq-app-generation-prompt.md
     for export, but the in-app/cross-ride presentation is bucketed, matching the
     start-of-ride treatment.
 
+16. **`g_P` corrected from 0.15 → 0.45 (found by the validation harness).** The
+    white paper gives `g_P ≈ (HR_max−HR_rest)/P_max ≈ 0.15 bpm/W`, but 0.15
+    implies `P_max ≈ 930 W` (a sprint peak). With it, `HR_ss = HR_rest + g_P·P`
+    underestimates fresh HR by ~50 bpm at endurance power, so `F` absorbs the
+    static-gain error and **AFI saturates to ~100 on every ride** — violating the
+    white paper's own §4.4 requirement that a long steady Z2 ride yields a
+    *moderate*, not severe, AFI (the model-consistency harness's `P9` check caught
+    this). The correct denominator is the **power at HR_max** (~threshold):
+    `(190−50)/~310 ≈ 0.45`. `g_P` is synthesis/hand-set (§9) and a live setting, so
+    this is a defaults correction, not a new physiological claim; calibration fits
+    it per athlete.
+
+17. **`A1_target` sigmoid retuned to cross 0.75 at P_AeT (harness-found).** The
+    white paper's `a0/a1 = 1.1/0.6` give a sigmoid midpoint of `a0 − a1/2 = 0.80`,
+    not the 0.75 AeT anchor it claims to pass through — so the population prior and
+    the calibrated 0.75 crossing disagreed by ~0.05. Set `a0=1.0, a1=0.5` →
+    midpoint 0.75 at P_AeT, asymptotes 1.0 (rest) / 0.5 (the AnT anchor). Synthesis
+    shape params + settings (§9); check `S1` guards it.
+
+18. **RR staleness timer (§8.4, harness-found).** The RR buffer ages out only by
+    summed RR-duration, not wall-clock, so when the strap drops, DFA kept emitting
+    a **stale α1** off the frozen buffer instead of marking it unavailable. Added a
+    `RR_STALE_S` (10 s) timer: once RR has been silent that long, α1 is marked
+    unavailable so the filter drops the α1 update and the tile greys — matching
+    §8.4's "hold last-valid then mark unavailable, reacquire cleanly." Mirrored in
+    the harness engine; A7's marker/reacquire rows exercise it.
+
 ## C. Values exposed as SETTINGS because the science flags them convention/synthesis
 
 All are in `resources/properties/properties.xml` (defaults) and
@@ -133,7 +160,7 @@ is hard-coded as if validated).
 | `decoupRef` | 8 % | synthesis — AFI-decoupling common-scale ref (§4.5) |
 | `seedA / seedB / seedTsbScale` | 0.6 / 0.4 / 30 | synthesis — start-of-ride seeding map (§7) |
 | `featWSev / featMatchW / featBestW / attrDriftW` | 0.02 / 40 / 30 / 100 | synthesis — Feat/Attrition weights (§8.2, off critical path) |
-| `gP / a0 / a1 / sigmoidS` | 0.15 / 1.1 / 0.6 / 0.02 | synthesis — now in the settings UI |
+| `gP / a0 / a1 / sigmoidS` | 0.45 / 1.0 / 0.5 / 0.02 | synthesis — now in the settings UI (gP/sigmoid harness-corrected, see §16–17) |
 | `qHr / qHrLat / qA1 / qF / rHr / rA1` | see file | hand-set Q/R — now in the settings UI |
 | `powerCvGate / coastFracGate` | 0.10 / 0.10 | steadiness/stationarity gate — now in the settings UI |
 | `decoupOk / decoupCaution / decoupHigh` | 5 / 8 / 10 % | convention (Friel) |
@@ -147,8 +174,8 @@ is hard-coded as if validated).
 | `kappaI / kappaD` | 1.45e-4 / 2.8e-3 | synthesis; hand-set |
 | `cF` | 0.0167 | synthesis; unvalidatable cross-signal gain |
 | `fRef` | 12 bpm | synthesis; **AFI linear in 1/F_ref** — sets the whole scale |
-| `a0 / a1 / sigmoidS` | 1.1 / 0.6 / 0.02 | population map, **not universal** |
-| `gP` | 0.15 bpm/W | static gain estimate |
+| `a0 / a1 / sigmoidS` | 1.0 / 0.5 / 0.02 | population map, **not universal**; crosses 0.75 at P_AeT (§17) |
+| `gP` | 0.45 bpm/W | static gain estimate (harness-corrected from 0.15, §16) |
 | `qHr / qHrLat / qA1 / qF / rHr / rA1` | see file | hand-set; no on-bike ground truth |
 | `positivePilot` | false | **release gate** for the numeric AFI (§8.1) |
 | `shipNumberOverride` | false | explicit pre-pilot numeric-AFI exception (§8.1) |

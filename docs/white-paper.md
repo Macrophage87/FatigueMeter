@@ -127,9 +127,9 @@ A1_meas(k) = A1(k) + v_A          # large R: DFA-α1 is slow and noisy
 | τ_HR | 30 s | HR kinetics |
 | τ_A | 90 s | DFA-α1 responds slowly |
 | τ_rec | 900 s | within-ride partial recovery |
-| g_P | ≈(HR_max−HR_rest)/P_max ≈ 0.15 bpm/W | static gain |
+| g_P | ≈(HR_max−HR_rest)/P_at_HRmax ≈ **0.45** bpm/W | static gain (**Rev 3 correction:** the earlier ≈0.15 took P_max as a ~930 W sprint peak, so HR_ss underestimated fresh HR by ~50 bpm and F/AFI saturated on any endurance ride — the model-consistency harness caught this; the denominator is the power **at HR_max** ≈ threshold ≈ 310 W) |
 | CP, P_AeT | from athlete (P_AeT ≈ 0.75·FTP) | pull FTP/CP from intervals.icu (may be **stale — propagates to W′bal, FeatScore, advisory**) |
-| a0, a1, s | 1.1, 0.6, 0.02/W | sigmoid through α1=0.75 at P_AeT (**population fiction for many riders — see caveat**) |
+| a0, a1, s | **1.0, 0.5**, 0.02/W | sigmoid through α1=0.75 at P_AeT (**Rev 3 correction:** the earlier 1.1/0.6 give a midpoint of a0−a1/2 = **0.80**, not the 0.75 AeT anchor the row claims — harness-flagged; 1.0/0.5 crosses 0.75 at P_AeT with clean asymptotes 1.0 rest / 0.5 AnT) (**population fiction for many riders — see caveat**) |
 | κ_i | tuned so 30 min at P_AeT+80 W lifts F ≈ 8–10 bpm | intensity charge |
 | κ_d | small, e.g. F rises ~2–3 bpm over 2 h at Z2 | duration/thermal charge |
 | c_F | tuned so F ≈ F_ref pulls α1 ~0.2 below its power-predicted value | α1↔F coupling gain |
@@ -349,3 +349,106 @@ Two tiers, so markers persist through the ride *and* roll up for cross-ride comp
 ## 12. Summary
 
 FatigueMeter composes a decade of slow-component, DFA-α1, decoupling, and training-load research into a coherent, on-device-feasible **durability/decoupling dashboard with a per-athlete-calibrated advisory**. Its **validated backbone** is the observable primitives — aerobic decoupling, CTL/ATL/TSB accounting, durability-drift magnitudes, the population α1=0.75 anchor. Its **novel, synthesis-grade layer** — the fused AFI, the α1-coupled Kalman drift state, the durability advisory, and the Feat/Attrition characterization — is honestly *inspired by* (not derived from) DALE and PM-EKF, is weakly observable on steady rides, and has **not** been validated against any external fatigue criterion. The project's distinctive discipline is provenance: every number is traceable, extraction confidence is separated from evidence strength, and the app is built so that its **UI confidence matches its evidence confidence** — descriptive advisories, persistent heuristic labels, and no directive verdict on unvalidated logic. The companion harness enforces **internal consistency with this stated model** — valuable regression protection, explicitly *not* a claim of agreement with physiological reality.
+
+---
+
+## Appendix A — Figures: modeled behavior of each fatigue variable
+
+The figures below model **how each fatigue variable behaves as fatigue
+increases**, computed directly from the equations in §3–§5 with the corrected
+Rev-3 seed constants (`g_P = 0.45`, `a0/a1 = 1.0/0.5`, `F_ref = 12`, `τ_rec =
+900 s`, `κ_i/κ_d`, decoupling 5/8/10 %, CTL/ATL 42/7 d). For the acute observables
+the x-axis is the latent drift state `F` (the acute-fatigue "engine"); for the
+accumulators it is time-on-task or training days. Source:
+[`figures/generate_figures.py`](figures/generate_figures.py); each figure is
+provided in **raster (`.png`, shown)** and **vector (`.svg`, linked)** form.
+
+> **Read these as shapes, not measurements.** The AFI and durability advisory are
+> synthesis-grade and unvalidated against any external fatigue criterion (§10);
+> the constants are per-athlete-calibratable defaults. Colour is always reinforced
+> with text/labels (never colour alone).
+
+**Overview — all variables at a glance**
+![Modeled behaviour of each fatigue variable with increasing fatigue](figures/00_overview.png)
+*Vector: [SVG](figures/00_overview.svg)*
+
+### Layer 2 — the acute-fatigue state and index
+
+**`F` — residual cardiovascular-drift state (§4.1–4.2).** The fatigue "engine":
+`dF/dt = [κ_i·max(0,P−P_AeT) + κ_d] − F/τ_rec`, so `F` charges toward
+`F_ss = charge·τ_rec` during work and relaxes on recovery (κ_d active-gated).
+![F residual cardiovascular-drift state vs time](figures/01_F_drift_state.png)
+*Vector: [SVG](figures/01_F_drift_state.svg)*
+
+**AFI — Acute Fatigue Index (§4.5).** `AFI = 100·clamp(F/F_ref, 0, 1)` — an
+*index*, not a measurement — climbing through the descriptive green/amber/red
+bands as `F` rises. AFI is linear in `1/F_ref`, so that one constant sets the
+whole scale before calibration.
+![AFI index vs fatigue with status bands](figures/02_AFI_index.png)
+*Vector: [SVG](figures/02_AFI_index.svg)*
+
+### Layer 1 — observable primitives (the validated backbone)
+
+**DFA-α1 (§3.3, §4.2).** (a) the population power→α1 map, a falling sigmoid
+crossing the **0.75 aerobic-threshold anchor** at `P_AeT` toward the 0.50
+anaerobic anchor; (b) at fixed power, fatigue pulls α1 **below its
+baseline-for-power** via the `−c_F·F` coupling — the drift, not the absolute
+value, is the fatigue signal.
+![DFA-alpha1 power map and fatigue drift](figures/03_DFA_alpha1.png)
+*Vector: [SVG](figures/03_DFA_alpha1.svg)*
+
+**Aerobic decoupling % (§3.1).** As drift lifts HR at fixed power, EF falls and
+decoupling `= 100·F/(HR_ss+F)` rises through the Friel 5 / 8 % convention bands.
+![Aerobic decoupling percent vs fatigue](figures/04_decoupling.png)
+*Vector: [SVG](figures/04_decoupling.svg)*
+
+**Efficiency Factor (§3.1).** `EF = NP/HR` — the mirror of decoupling — declines
+from its fresh baseline as fatigue lifts HR.
+![Efficiency Factor vs fatigue](figures/05_efficiency_factor.png)
+*Vector: [SVG](figures/05_efficiency_factor.svg)*
+
+**Heart rate at fixed power.** The raw cardiovascular drift the model decomposes:
+`HR = HR_ss + F` rises linearly with the fatigue state.
+![HR at fixed power vs fatigue](figures/06_hr_drift.png)
+*Vector: [SVG](figures/06_hr_drift.svg)*
+
+**Cadence drift (§3.4).** A **low-weight corroborator** — ~0.6 % decoupling per
+rpm of cadence decline (r≈0.40); shown rising modestly with fatigue.
+![Cadence drift vs fatigue](figures/07_cadence_drift.png)
+*Vector: [SVG](figures/07_cadence_drift.svg)*
+
+**W′bal and "matches" (§3.4, §8.2).** The Skiba differential reserve depletes in a
+sawtooth over hard intervals; each dip below 20 % then recovery is a **match** —
+an intuitive count of severe-domain efforts (anaerobic fatigue).
+![W-prime balance and matches over an interval effort](figures/08_wprime_bal.png)
+*Vector: [SVG](figures/08_wprime_bal.svg)*
+
+**Intensity-weighted kJ — the durability clock (§3.2).** Accumulates
+monotonically toward the person-specific durability anchor (~1500 kJ developing →
+~2500 kJ trained); durability decline is driven by *intensity-weighted* work, not
+raw volume.
+![Intensity-weighted kJ durability clock](figures/09_kj_durability_clock.png)
+*Vector: [SVG](figures/09_kj_durability_clock.svg)*
+
+### Layer 3 — residual (training-scale) fatigue
+
+**CTL / ATL / TSB (§5).** During a build block ATL (7-day) rises faster than CTL
+(42-day), so **TSB = CTL − ATL goes negative** — the residual fatigue carried into
+the next ride — then recovers on the taper.
+![CTL ATL TSB over a build block and taper](figures/10_ctl_atl_tsb.png)
+*Vector: [SVG](figures/10_ctl_atl_tsb.svg)*
+
+**Resting RMSSD (§5).** Tracked against the athlete's **personal 7-day rolling
+baseline ±1 SD** (not a universal cutoff); a *sustained* decline below −1 SD is
+the overreaching flag — single dips are noise.
+![RMSSD vs personal baseline](figures/11_rmssd_baseline.png)
+*Vector: [SVG](figures/11_rmssd_baseline.svg)*
+
+### Effort characterization (off the verdict critical path)
+
+**FeatScore vs AttritionScore (§8.2).** Both rise with high-fatigue effort, but
+characterize *different* red: **Feat** is fatigue bought with output (kJ>CP,
+severe-domain time, W′ matches); **Attrition** is drift at sub-threshold power
+past the durability anchor. Context, never a gate.
+![FeatScore vs AttritionScore](figures/12_feat_vs_attrition.png)
+*Vector: [SVG](figures/12_feat_vs_attrition.svg)*
