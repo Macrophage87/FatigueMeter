@@ -73,6 +73,15 @@ Real files: `fatiguemeter/signals.py` ingests **CSV** (`time,power,hr,cadence,rr
 RR values `|`-separated) out of the box, and **FIT** via the optional `fitparse`
 package (`pip install fitparse`). A tiny CSV fixture is in `tests/data/`.
 
+## CI
+
+`.github/workflows/validation-harness.yml` runs the harness on every PR and on
+pushes to `main`: it installs `requirements.txt`, runs `run_report.py` (which
+**exits non-zero on any HARD/STRUCTURAL/ADVERSARIAL/HONESTY/CALIBRATION failure**,
+so a structural regression blocks the merge), then the pytest suite, and uploads
+the human-readable report as a build artifact. PLAUSIBILITY checks only warn and
+never fail the build.
+
 ## A real bug this harness caught
 
 The default static HR–power gain `gP` shipped as `0.15` (the white paper's `≈`
