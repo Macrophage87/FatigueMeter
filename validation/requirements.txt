@@ -1,0 +1,5 @@
+numpy>=1.23
+pytest>=7.0
+hypothesis>=6.0
+# optional: FIT-file ingestion (CSV works without it)
+# fitparse>=1.2

@@ -1,0 +1,59 @@
+name: validation-harness
+
+# Runs the FatigueMeter model-consistency harness. `run_report.py` exits non-zero
+# on any HARD / STRUCTURAL / ADVERSARIAL / HONESTY / CALIBRATION failure, so a
+# structural regression (coupling unwired, respiration manufacturing fatigue,
+# observability degenerate, AFI unbounded, …) blocks the merge. PLAUSIBILITY
+# checks only warn and never fail the build.
+#
+# The harness needs the app it validates present in the checkout (source/,
+# resources/, docs/) — which it is, since validation/ ships alongside them.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# cancel superseded runs on the same ref
+concurrency:
+  group: harness-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  harness:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: validation
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: validation/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # The report runs the full assertion catalog ONCE and is the build gate
+      # (non-zero exit on any HARD/STRUCTURAL/ADVERSARIAL/HONESTY/CALIBRATION
+      # failure). We then run only the FAST pytest layers (hypothesis property
+      # tests + CSV ingestion) — test_catalog.py re-runs the same slow catalog and
+      # enforces the identical tier contract, so it's redundant with the report in
+      # CI and is skipped here to keep the pipeline quick (run it locally via
+      # `pytest -q` for per-check granularity).
+      - name: Model-consistency report (gates on HARD/STRUCTURAL failures)
+        run: python run_report.py --md report.md
+
+      - name: Pytest — hypothesis property layer + ingestion (fast)
+        run: python -m pytest tests/test_properties.py tests/test_ingestion.py -q
+
+      - name: Upload the human-readable report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-consistency-report
+          path: validation/report.md
+          if-no-files-found: warn
