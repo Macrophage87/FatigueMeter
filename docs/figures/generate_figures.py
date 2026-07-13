@@ -411,8 +411,11 @@ def fig_kj():
     fig, ax = plt.subplots(figsize=(6.6, 3.9))
     ax.plot(ts, wtds, color=BLUE, lw=2.4, ls="-", label="intensity-weighted kJ (durability clock)")
     ax.plot(ts, raws, color=MUTED, lw=1.8, ls="--", label="raw kJ (volume only)")
-    ax.text(ts[-1] * 0.62, (wtds[int(len(ts)*0.62)] + raws[int(len(ts)*0.62)]) / 2,
-            "weighting\ndiverges on\nsupra-CP surges", color=INK2, fontsize=8, ha="center")
+    # Sit the note in the divergence gap but below the ~2500 anchor line so the
+    # multi-line block clears the dotted anchor (PR#4 re-review nit).
+    ax.text(ts[-1] * 0.62, (wtds[int(len(ts)*0.62)] + raws[int(len(ts)*0.62)]) / 2 - 300,
+            "weighting\ndiverges on\nsupra-CP surges", color=INK2, fontsize=8,
+            ha="center", va="center")
     for anch, lbl, c in [(KJ_ANCHOR_LOW, "developing anchor ~1500 kJ", "#a9760a"),
                          (KJ_ANCHOR_HIGH, "trained anchor ~2500 kJ", CRIT)]:
         ax.axhline(anch, color=c, ls=":", lw=1.1)
