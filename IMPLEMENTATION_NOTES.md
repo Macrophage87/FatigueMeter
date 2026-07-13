@@ -131,6 +131,21 @@ It is a required deliverable of `docs/prompts/connectiq-app-generation-prompt.md
     this is a defaults correction, not a new physiological claim; calibration fits
     it per athlete.
 
+17. **`A1_target` sigmoid retuned to cross 0.75 at P_AeT (harness-found).** The
+    white paper's `a0/a1 = 1.1/0.6` give a sigmoid midpoint of `a0 − a1/2 = 0.80`,
+    not the 0.75 AeT anchor it claims to pass through — so the population prior and
+    the calibrated 0.75 crossing disagreed by ~0.05. Set `a0=1.0, a1=0.5` →
+    midpoint 0.75 at P_AeT, asymptotes 1.0 (rest) / 0.5 (the AnT anchor). Synthesis
+    shape params + settings (§9); check `S1` guards it.
+
+18. **RR staleness timer (§8.4, harness-found).** The RR buffer ages out only by
+    summed RR-duration, not wall-clock, so when the strap drops, DFA kept emitting
+    a **stale α1** off the frozen buffer instead of marking it unavailable. Added a
+    `RR_STALE_S` (10 s) timer: once RR has been silent that long, α1 is marked
+    unavailable so the filter drops the α1 update and the tile greys — matching
+    §8.4's "hold last-valid then mark unavailable, reacquire cleanly." Mirrored in
+    the harness engine; A7's marker/reacquire rows exercise it.
+
 ## C. Values exposed as SETTINGS because the science flags them convention/synthesis
 
 All are in `resources/properties/properties.xml` (defaults) and
