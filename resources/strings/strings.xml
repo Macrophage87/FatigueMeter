@@ -22,10 +22,8 @@
     <string id="DecoupOnlyTag">decoupling-only (RR poor)</string>
     <string id="NotMedical">Not a medical device · within-ride fatigue unvalidated outdoors</string>
 
-    <!-- Coarse start-of-ride / fatigue-added buckets (white paper §7) -->
-    <string id="BucketFresh">fresh</string>
-    <string id="BucketModerate">moderately loaded</string>
-    <string id="BucketHeavy">heavily loaded</string>
+    <!-- (Rev 5) Start-of-ride bucket display strings removed — start-of-ride
+         fatigue is no longer estimated or displayed (F(0) starts neutral). -->
 
     <!-- Settings menu labels -->
     <string id="SetGroupProfile">Athlete profile</string>
@@ -37,8 +35,6 @@
     <string id="SetSex">Sex</string>
     <string id="SexMale">Male</string>
     <string id="SexFemale">Female</string>
-    <string id="SetCtlSeed">CTL seed</string>
-    <string id="SetAtlSeed">ATL seed</string>
 
     <string id="SetGroupFilter">Acute filter (advanced)</string>
     <string id="SetTauHr">τ_HR (s)</string>
@@ -61,8 +57,6 @@
     <string id="SetAfiBuilding">AFI building cutoff</string>
     <string id="SetAfiDriftMargin">AFI drift margin</string>
     <string id="SetDecoupRef">Decoupling AFI ref %</string>
-    <string id="SetTsbFresh">TSB fresh band</string>
-    <string id="SetTsbOverreach">TSB overreach band</string>
     <string id="SetPowerCvGate">Steadiness power CV gate</string>
     <string id="SetCoastFracGate">Coasting fraction gate</string>
     <string id="SetGp">g_P gain (bpm/W)</string>
@@ -77,7 +71,6 @@
     <string id="SetRA1">R α1</string>
 
     <string id="SetGroupOptions">Options</string>
-    <string id="SetAcwrEnabled">Show ACWR (opt-in, contested)</string>
     <string id="SetPositivePilot">Numeric AFI unlocked (pilot)</string>
     <string id="SetShipNumberOverride">Ship AFI number pre-pilot (override)</string>
     <string id="SetUnitsMetric">Metric units</string>

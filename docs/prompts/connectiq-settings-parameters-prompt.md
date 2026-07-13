@@ -64,8 +64,8 @@ Format: `# | Display title (exact) | property id | control | min | max | default
 | 4 | `HR max (bpm)` | `hrMax` | numeric | 120 | 230 | 190 (number) |
 | 5 | `HR rest (bpm)` | `hrRest` | numeric | 30 | 90 | 50 (number) |
 | 6 | `Sex` | `sexFemale` | boolean | — | — | false (boolean) |
-| 7 | `CTL seed` | `ctlSeed` | numeric | 0 | 200 | 70.0 (float) |
-| 8 | `ATL seed` | `atlSeed` | numeric | 0 | 200 | 70.0 (float) |
+| ~~7~~ | ~~`CTL seed` / `ctlSeed`~~ | — | — | — | — | **REMOVED (Rev 5)** — no on-device cross-ride CTL/ATL state to seed |
+| ~~8~~ | ~~`ATL seed` / `atlSeed`~~ | — | — | — | — | **REMOVED (Rev 5)** |
 
 **Group 2 — Acute filter (advanced)**
 
@@ -93,8 +93,8 @@ Format: `# | Display title (exact) | property id | control | min | max | default
 | 23 | `AFI building cutoff` | `afiBuilding` | numeric | 40 | 90 | 60.0 (float) |
 | 24 | `AFI drift margin` | `afiDriftMargin` | numeric | 5 | 40 | 15.0 (float) |
 | 25 | `Decoupling AFI ref %` | `decoupRef` | numeric | 3 | 20 | 8.0 (float) |
-| 26 | `TSB fresh band` | `tsbFresh` | numeric | 0 | 30 | 10.0 (float) |
-| 27 | `TSB overreach band` | `tsbOverreach` | numeric | -60 | -10 | -30.0 (float) |
+| ~~26~~ | ~~`TSB fresh band` / `tsbFresh`~~ | — | — | — | — | **REMOVED (Rev 5)** — no on-device TSB readout |
+| ~~27~~ | ~~`TSB overreach band` / `tsbOverreach`~~ | — | — | — | — | **REMOVED (Rev 5)** |
 | 28 | `Steadiness power CV gate` | `powerCvGate` | numeric | 0.02 | 0.5 | 0.10 (float) |
 | 29 | `Coasting fraction gate` | `coastFracGate` | numeric | 0.02 | 0.5 | 0.10 (float) |
 
@@ -117,7 +117,7 @@ Format: `# | Display title (exact) | property id | control | min | max | default
 
 | # | Display title (exact) | property id | control | min | max | default |
 |---|---|---|---|---|---|---|
-| 40 | `Show ACWR (opt-in, contested)` | `acwrEnabled` | boolean | — | — | false (boolean) |
+| ~~40~~ | ~~`Show ACWR (opt-in, contested)` / `acwrEnabled`~~ | — | — | — | — | **REMOVED (Rev 5)** — ACWR was a cross-ride readout the field no longer computes |
 | 41 | `Numeric AFI unlocked (pilot)` | `positivePilot` | boolean | — | — | false (boolean) |
 | 42 | `Ship AFI number pre-pilot (override)` | `shipNumberOverride` | boolean | — | — | false (boolean) |
 | 43 | `Metric units` | `unitsMetric` | boolean | — | — | true (boolean) |
@@ -160,8 +160,8 @@ without following the rule for that parameter.
 | 4 | `HR max (bpm)` | A | Highest reliable HR observed in the record (max-effort intervals / field test), not an age formula if real data exists. |
 | 5 | `HR rest (bpm)` | A | Lowest stable resting/morning HR from wellness data. |
 | 6 | `Sex` | B | Direct from profile — set `sexFemale = true` for female, `false` for male. |
-| 7 | `CTL seed` | A | The athlete's **current CTL / "Fitness"** at install time, from the training record. Clamp 0–200. |
-| 8 | `ATL seed` | A | The athlete's **current ATL / "Fatigue"** at install time. Clamp 0–200. |
+| ~~7~~ | ~~`CTL seed`~~ | — | **REMOVED (Rev 5)** — the field no longer keeps a cross-ride CTL/ATL/TSB state; that record lives in the training-load platform. |
+| ~~8~~ | ~~`ATL seed`~~ | — | **REMOVED (Rev 5)** — see above. |
 | 9–15 | `τ_HR (s)` … `F_ref (bpm)` | C | Acute Kalman time-constants and intensity/duration charges — **leave at default.** Calibration-only. |
 | 16 | `Decoupling OK %` | C | Leave default (5%). The app already scores decoupling as **drift vs. the athlete's own minutes-5–15 baseline** (StatusEvaluator / PrimitivesCalculator), so these bands apply to *personalized drift* — re-deriving an absolute band would double-count the baseline. |
 | 17 | `Decoupling caution %` | C | Leave default (8%). Applied to personalized drift; keep OK < caution < high. |
@@ -185,8 +185,8 @@ without following the rule for that parameter.
 
 **Type rounding.** `ftp`, `cp`, `wPrime`, `hrMax`, `hrRest` are `number` (integer) — round
 every generated value to a whole number; never emit a fractional watt/Joule/bpm (a CP or
-W′ from a curve fit **must** be rounded). `ctlSeed` / `atlSeed` are `float`, so a decimal
-is fine there.
+W′ from a curve fit **must** be rounded). The float profile seeds `ctlSeed`/`atlSeed` were
+**removed in Rev 5** (no on-device cross-ride load state), so that carve-out no longer applies.
 
 **Consistency pass (run after generating all Tier-A values, before emitting).** The Tier-A
 parameters are derived independently, so assert these physiological orderings and repair

@@ -12,7 +12,6 @@ class Config {
 
     // profile
     var ftp; var cp; var wPrime; var hrMax; var hrRest; var sexFemale;
-    var ctlSeed; var atlSeed;
     // filter
     var tauHr; var tauA; var tauRec; var kappaI; var kappaD; var cF; var fRef;
     var a0; var a1; var sigmoidS; var gP;
@@ -21,12 +20,10 @@ class Config {
     var decoupOk; var decoupCaution; var decoupHigh; var artifactGate;
     var powerCvGate; var coastFracGate; var kjAnchor;
     var afiFresh; var afiBuilding; var afiDriftMargin; var decoupRef;
-    // seeding map (synthesis §7)
-    var seedA; var seedB; var seedTsbScale;
     // feat/attrition weights (synthesis §8.2)
     var featWSev; var featMatchW; var featBestW; var attrDriftW;
-    // load
-    var tsbFresh; var tsbOverreach; var trimpFemaleCoeff; var acwrEnabled;
+    // load (per-ride TRIMP coefficient; cross-ride CTL/ATL/TSB removed — Rev 5)
+    var trimpFemaleCoeff;
     // honesty
     var positivePilot; var shipNumberOverride; var unitsMetric;
     // derived
@@ -70,8 +67,6 @@ class Config {
         hrMax    = num("hrMax", 190).toFloat();
         hrRest   = num("hrRest", 50).toFloat();
         sexFemale = bool("sexFemale", false);
-        ctlSeed  = num("ctlSeed", 70.0).toFloat();
-        atlSeed  = num("atlSeed", 70.0).toFloat();
 
         tauHr    = num("tauHr", Constants.TAU_HR).toFloat();
         tauA     = num("tauA", Constants.TAU_A).toFloat();
@@ -104,19 +99,12 @@ class Config {
         afiDriftMargin = num("afiDriftMargin", 15.0).toFloat();
         decoupRef     = num("decoupRef", Constants.DECOUP_REF).toFloat();
 
-        seedA        = num("seedA", 0.6).toFloat();
-        seedB        = num("seedB", 0.4).toFloat();
-        seedTsbScale = num("seedTsbScale", 30.0).toFloat();
-
         featWSev     = num("featWSev", 0.02).toFloat();
         featMatchW   = num("featMatchW", 40.0).toFloat();
         featBestW    = num("featBestW", 30.0).toFloat();
         attrDriftW   = num("attrDriftW", 100.0).toFloat();
 
-        tsbFresh     = num("tsbFresh", Constants.TSB_FRESH).toFloat();
-        tsbOverreach = num("tsbOverreach", Constants.TSB_OVERREACH).toFloat();
         trimpFemaleCoeff = num("trimpFemaleCoeff", Constants.TRIMP_FEMALE_COEFF_DEFAULT).toFloat();
-        acwrEnabled  = bool("acwrEnabled", false);
 
         positivePilot     = bool("positivePilot", false);
         shipNumberOverride = bool("shipNumberOverride", false);

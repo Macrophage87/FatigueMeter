@@ -13,8 +13,7 @@
     <property id="hrMax"          type="number">190</property>
     <property id="hrRest"         type="number">50</property>
     <property id="sexFemale"      type="boolean">false</property>
-    <property id="ctlSeed"        type="float">70.0</property>
-    <property id="atlSeed"        type="float">70.0</property>
+    <!-- (Rev 5) ctlSeed / atlSeed removed — no on-device cross-ride CTL/ATL state. -->
 
     <!-- Acute Kalman filter seeds / gains (white paper §4.4 — all synthesis-grade) -->
     <property id="tauHr"          type="float">30.0</property>
@@ -50,10 +49,8 @@
     <property id="afiDriftMargin" type="float">15.0</property>
     <property id="decoupRef"      type="float">8.0</property>
 
-    <!-- Start-of-ride seeding map coefficients (synthesis §7 — configurable) -->
-    <property id="seedA"          type="float">0.6</property>
-    <property id="seedB"          type="float">0.4</property>
-    <property id="seedTsbScale"   type="float">30.0</property>
+    <!-- (Rev 5) Start-of-ride seeding map (seedA/seedB/seedTsbScale) removed —
+         F(0) starts neutral and no longer reads a cross-ride residual state. -->
 
     <!-- Feat/Attrition weights (synthesis, arbitrary §8.2 — off critical path) -->
     <property id="featWSev"       type="float">0.02</property>
@@ -61,11 +58,9 @@
     <property id="featBestW"      type="float">30.0</property>
     <property id="attrDriftW"     type="float">100.0</property>
 
-    <!-- Layer-3 TSB / load -->
-    <property id="tsbFresh"       type="float">10.0</property>
-    <property id="tsbOverreach"   type="float">-30.0</property>
+    <!-- Layer-3 per-ride load (cross-ride tsbFresh/tsbOverreach/acwrEnabled
+         removed in Rev 5 — the field computes only per-ride load now) -->
     <property id="trimpFemaleCoeff" type="float">0.86</property>
-    <property id="acwrEnabled"    type="boolean">false</property>
 
     <!-- Honesty / release gates -->
     <property id="positivePilot"       type="boolean">false</property>

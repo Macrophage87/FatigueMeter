@@ -37,12 +37,6 @@ module DescriptiveStrings {
     function decoupOnlyTag() { return load(Rez.Strings.DecoupOnlyTag); }
     function notMedical() { return load(Rez.Strings.NotMedical); }
 
-    function startBucketLabel(bucket) {
-        if (bucket.equals("fresh")) { return load(Rez.Strings.BucketFresh); }
-        if (bucket.equals("heavy")) { return load(Rez.Strings.BucketHeavy); }
-        return load(Rez.Strings.BucketModerate);
-    }
-
     function load(res) {
         try { return WatchUi.loadResource(res); } catch (e) { return ""; }
     }
