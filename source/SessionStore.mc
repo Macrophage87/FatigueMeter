@@ -47,25 +47,23 @@ class SessionStore {
     }
 
     //! Build a Session Result dictionary (white paper §8.3 fields).
-    static function buildResult(date, durationS, tss, startFatigue, endFatigue,
-                                fatigueAdded, peakAfi, redFeatS, redAttrS,
-                                featScore, attritionScore, best1, best5, best20,
-                                matches, durabilityKj, ctl, atl, tsb,
-                                startBucket, endBucket, addedBucket, fatigueBandPts) {
-        // Raw bpm (startFatigue/endFatigue/fatigueAdded) are kept for FIT export;
-        // the coarse BUCKETS + uncertainty band (white paper §7) are what the
-        // cross-ride comparison view should present — never the raw point value.
+    //!
+    //! Ride-scoped, ride-measured quantities only. Pre-ride residual fatigue and
+    //! the cross-ride CTL/ATL/TSB are not computable on-device (§7 revised) and are
+    //! deliberately absent — `endFatigue` is the ride-INDUCED cardiovascular drift
+    //! (acute F from a neutral start), reported as a coarse bucket, never a raw bpm.
+    static function buildResult(date, durationS, tss, endFatigue, peakAfi,
+                                redFeatS, redAttrS, featScore, attritionScore,
+                                best1, best5, best20, matches, durabilityKj,
+                                endBucket, fatigueBandPts) {
         return {
             "date" => date, "durationS" => durationS, "tss" => tss,
-            "startFatigue" => startFatigue, "endFatigue" => endFatigue,
-            "fatigueAdded" => fatigueAdded, "peakAfi" => peakAfi,
-            "startBucket" => startBucket, "endBucket" => endBucket,
-            "addedBucket" => addedBucket, "fatigueBandPts" => fatigueBandPts,
+            "endFatigue" => endFatigue, "peakAfi" => peakAfi,
+            "endBucket" => endBucket, "fatigueBandPts" => fatigueBandPts,
             "redFeatS" => redFeatS, "redAttrS" => redAttrS,
             "featScore" => featScore, "attritionScore" => attritionScore,
             "best1" => best1, "best5" => best5, "best20" => best20,
-            "matches" => matches, "durabilityKj" => durabilityKj,
-            "ctl" => ctl, "atl" => atl, "tsb" => tsb
+            "matches" => matches, "durabilityKj" => durabilityKj
         };
     }
 }

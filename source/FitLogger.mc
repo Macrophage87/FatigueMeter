@@ -69,9 +69,12 @@ class FitLogger {
 
     hidden function createSessionFields(df) {
         mkSes(df, SFLD_TSS,       "TSS",          "");
-        mkSes(df, SFLD_START_FAT, "start_fatigue","bpm");
-        mkSes(df, SFLD_END_FAT,   "end_fatigue",  "bpm");
-        mkSes(df, SFLD_FAT_ADDED, "fatigue_added","bpm");
+        // end_fatigue is the ride-INDUCED cardiovascular drift (acute F from a
+        // neutral start). start_fatigue / fatigue_added are intentionally NOT
+        // exported: a pre-ride residual can't be computed from ride data (§7
+        // revised), and exporting a neutral-0 or ledger-guessed value to Garmin /
+        // intervals.icu would duplicate or contradict the authoritative load record.
+        mkSes(df, SFLD_END_FAT,   "ride_drift",   "bpm");
         mkSes(df, SFLD_PEAK_AFI,  "peak_AFI",     "idx");
         mkSes(df, SFLD_RED_FEAT,  "red_feat_s",   "s");
         mkSes(df, SFLD_RED_ATTR,  "red_attr_s",   "s");
@@ -107,9 +110,7 @@ class FitLogger {
     function logSession(summary) {
         if (!ok) { return; }
         setSes(SFLD_TSS, summary[:tss]);
-        setSes(SFLD_START_FAT, summary[:startFatigue]);
         setSes(SFLD_END_FAT, summary[:endFatigue]);
-        setSes(SFLD_FAT_ADDED, summary[:fatigueAdded]);
         setSes(SFLD_PEAK_AFI, summary[:peakAfi]);
         setSes(SFLD_RED_FEAT, summary[:redFeatS]);
         setSes(SFLD_RED_ATTR, summary[:redAttrS]);

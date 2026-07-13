@@ -27,7 +27,6 @@ class FatigueMeterView extends WatchUi.DataField {
     hidden var finalized;
 
     // ride-summary accumulators
-    hidden var startFatigueBpm;
     hidden var peakAfi;
     hidden var lastFreshMatchCount;
 
@@ -66,7 +65,6 @@ class FatigueMeterView extends WatchUi.DataField {
         tick = 0;
         seeded = false;
         finalized = false;
-        startFatigueBpm = 0.0;
         peakAfi = 0.0;
         lastFreshMatchCount = 0;
 
@@ -154,13 +152,16 @@ class FatigueMeterView extends WatchUi.DataField {
         // ---- Layer 1 ----
         prims.update(power, hr, cadence, rr, tick);
 
-        // ---- Layer 3 accumulation ----
+        // ---- ride load (TSS) accumulation — the one honest per-ride Layer-3 output ----
         ledger.update(power, hr);
 
-        // ---- seed F(0) from residual state at ride start (§7) ----
+        // ---- F(0) starts NEUTRAL (§7 revised) ----
+        // The acute filter no longer seeds from a cross-ride ledger: an on-device
+        // data field can't keep an honest CTL/ATL/TSB (it sees only the rides it
+        // runs, never other-app/indoor rides or a morning HRV reading), so we do
+        // NOT claim a pre-ride fatigue we can't compute from ride data. F(0) is 0.
         if (!seeded && tick >= 2) {
-            startFatigueBpm = ledger.seedFatigueBpm();
-            filter.seedFromLayer3(startFatigueBpm);
+            filter.seedFromLayer3(0.0);
             seeded = true;
         }
 
@@ -252,22 +253,18 @@ class FatigueMeterView extends WatchUi.DataField {
         if (finalized) { return; }
         finalized = true;
 
-        var endF = filter.fState();
-        var fold = ledger.finalizeRide();
-        var added = endF - startFatigueBpm;
-
-        // §7: end-of-ride fatigue and fatigue-added are BUCKETED (differences of
-        // soft, weakly-observable estimates), never presented as point bpm on
-        // screen. The raw bpm still flow to the FIT session field for export.
-        var startBucketLbl = AcuteFatigueFilter.fatigueBucket(startFatigueBpm, cfg.fRef);
-        var endBucketLbl = AcuteFatigueFilter.fatigueBucket(endF, cfg.fRef);
-        var addedBucketLbl = AcuteFatigueFilter.deltaBucket(added, cfg.fRef);
+        // Ride-induced cardiovascular drift (acute F from a NEUTRAL start) and ride
+        // TSS are the honest, ride-scoped Layer-3 outputs. Pre-ride residual fatigue
+        // and cross-ride CTL/ATL/TSB are NOT computable on-device (§7 revised), so
+        // they are neither exported to the FIT nor kept in the session history — the
+        // training-load platform (intervals.icu / Garmin) owns that record.
+        var rideDrift = filter.fState();
+        var rideTss = ledger.finalizeRide();
+        var driftBucketLbl = AcuteFatigueFilter.fatigueBucket(rideDrift, cfg.fRef);
 
         var summary = {
-            :tss => fold[:load],
-            :startFatigue => startFatigueBpm,
-            :endFatigue => endF,
-            :fatigueAdded => added,
+            :tss => rideTss,
+            :endFatigue => rideDrift,
             :peakAfi => peakAfi,
             :redFeatS => effort.redFeatSeconds(),
             :redAttrS => effort.redAttritionSeconds(),
@@ -276,14 +273,13 @@ class FatigueMeterView extends WatchUi.DataField {
         fit.logSession(summary);
 
         var result = SessionStore.buildResult(
-            ledger.dayIndexPublic(), tick, fold[:load],
-            startFatigueBpm, endF, added, peakAfi,
+            ledger.dayIndexPublic(), tick, rideTss,
+            rideDrift, peakAfi,
             effort.redFeatSeconds(), effort.redAttritionSeconds(),
             effort.feat(effort.best5()), effort.attrition(0.0),
             effort.best1(), effort.best5(), effort.best20(),
             effort.matchesBurned(), prims.kjWeightedValue(),
-            fold[:ctlEnd], fold[:atlEnd], fold[:startTsb],
-            startBucketLbl, endBucketLbl, addedBucketLbl, filter.afiUncertainty());
+            driftBucketLbl, filter.afiUncertainty());
         sessions.append(result);
     }
 
