@@ -18,12 +18,8 @@
     <setting propertyKey="@Properties.sexFemale" title="@Strings.SetSex">
         <settingConfig type="boolean"/>
     </setting>
-    <setting propertyKey="@Properties.ctlSeed" title="@Strings.SetCtlSeed">
-        <settingConfig type="numeric" min="0" max="200"/>
-    </setting>
-    <setting propertyKey="@Properties.atlSeed" title="@Strings.SetAtlSeed">
-        <settingConfig type="numeric" min="0" max="200"/>
-    </setting>
+    <!-- (Rev 5) ctlSeed / atlSeed removed — the field no longer maintains a
+         cross-ride CTL/ATL/TSB state, so there is nothing to seed. -->
 
     <!-- Acute filter (advanced; synthesis-grade — white paper §4.4) -->
     <setting propertyKey="@Properties.tauHr" title="@Strings.SetTauHr">
@@ -79,12 +75,7 @@
     <setting propertyKey="@Properties.decoupRef" title="@Strings.SetDecoupRef">
         <settingConfig type="numeric" min="3" max="20"/>
     </setting>
-    <setting propertyKey="@Properties.tsbFresh" title="@Strings.SetTsbFresh">
-        <settingConfig type="numeric" min="0" max="30"/>
-    </setting>
-    <setting propertyKey="@Properties.tsbOverreach" title="@Strings.SetTsbOverreach">
-        <settingConfig type="numeric" min="-60" max="-10"/>
-    </setting>
+    <!-- (Rev 5) tsbFresh / tsbOverreach removed with the on-device TSB readout. -->
     <setting propertyKey="@Properties.powerCvGate" title="@Strings.SetPowerCvGate">
         <settingConfig type="numeric" min="0.02" max="0.5"/>
     </setting>
@@ -125,9 +116,8 @@
     </setting>
 
     <!-- Options -->
-    <setting propertyKey="@Properties.acwrEnabled" title="@Strings.SetAcwrEnabled">
-        <settingConfig type="boolean"/>
-    </setting>
+    <!-- (Rev 5) acwrEnabled removed — ACWR was a cross-ride readout the field no
+         longer computes. -->
     <setting propertyKey="@Properties.positivePilot" title="@Strings.SetPositivePilot">
         <settingConfig type="boolean"/>
     </setting>

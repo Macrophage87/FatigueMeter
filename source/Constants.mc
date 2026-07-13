@@ -33,13 +33,9 @@ module Constants {
     const KJ_ANCHOR_LOW = 1500.0;   // developing / U23-like
     const KJ_ANCHOR_HIGH = 2500.0;  // well-trained
 
-    // ---- CTL / ATL EWMA time constants (TrainingPeaks; standard/established) ----
-    const CTL_TAU = 42.0;
-    const ATL_TAU = 7.0;
-
-    // ---- Friel TSB bands (coaching convention; NOT peer-reviewed) ----
-    const TSB_FRESH = 10.0;
-    const TSB_OVERREACH = -30.0;
+    // (Rev 5) CTL/ATL EWMA time constants and Friel TSB bands removed with the
+    // on-device cross-ride training-load state — the field no longer computes
+    // CTL/ATL/TSB (see TrainingLoadLedger; only per-ride load is exported).
 
     // ---- Kalman seeds / gains (white paper §4.4 — SYNTHESIS / hand-set) ----
     // No on-bike ground truth (§10). Defaults only; live values from Config.
