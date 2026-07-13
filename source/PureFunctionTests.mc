@@ -117,10 +117,13 @@ module PureFunctionTests {
 
     (:test)
     function testA1TargetFalling(logger) {
-        // sigmoid crosses ~0.75 at P_AeT and falls with power
-        var atAet = AcuteFatigueFilter.a1Target(240.0, 240.0, 1.1, 0.6, 0.02);
-        var high = AcuteFatigueFilter.a1Target(360.0, 240.0, 1.1, 0.6, 0.02);
-        return near(atAet, 0.8, 0.06) && high < atAet;
+        // The A1_target sigmoid must cross the 0.75 AeT anchor AT P_AeT and fall
+        // with power. Use the shipped a0/a1 (1.0/0.5) so this validates the
+        // CORRECTED sigmoid, not the retired 1.1/0.6 (which crossed 0.80).
+        var cfg = new Config();
+        var atAet = AcuteFatigueFilter.a1Target(cfg.pAeT, cfg.pAeT, cfg.a0, cfg.a1, cfg.sigmoidS);
+        var high = AcuteFatigueFilter.a1Target(cfg.pAeT + 120, cfg.pAeT, cfg.a0, cfg.a1, cfg.sigmoidS);
+        return near(atAet, 0.75, 0.001) && high < atAet;
     }
 
     (:test)
@@ -134,6 +137,29 @@ module PureFunctionTests {
         }
         var res = DfaAlpha1.compute(rr, 4, 16);
         return res[0] > 0.5 && MathUtil.isFinite(res[0]);
+    }
+
+    (:test)
+    function testRrStalenessMarksAlpha1Unavailable(logger) {
+        // §8.4 staleness timer: with fresh RR, α1 is usable; once RR has been
+        // silent for > RR_STALE_S the α1 tile must go UNAVAILABLE (not keep
+        // emitting a stale value off the aged buffer).
+        var cfg = new Config();
+        var prims = new PrimitivesCalculator(cfg);
+        var t = 0;
+        for (var s = 0; s < 130; s++) {          // ~130 s of gently-varying RR
+            t += 1;
+            var a = 560 + (t * 13) % 80;         // 560..639 ms, low-artifact variation
+            var b = 560 + (t * 29) % 80;
+            prims.update(200, 130, 90, [a, b], t);
+        }
+        var withRr = prims.alpha1Metric();       // fresh RR -> usable
+        for (var s = 0; s < 15; s++) {           // RR goes silent for > 10 s
+            t += 1;
+            prims.update(200, 130, 90, null, t);
+        }
+        var stale = prims.alpha1Metric();        // must now be unavailable
+        return withRr.isUsable() && !stale.isPresent();
     }
 
     (:test)

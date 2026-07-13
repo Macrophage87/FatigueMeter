@@ -96,13 +96,23 @@ def _eqn(ax, text):
             color=MUTED, style="italic", va="bottom")
 
 
+def _illustrative(ax, loc="lower right"):
+    """Stamp an on-figure honesty mark for panels likely to be shared standalone
+    (§4.3a/§10 — the fused/convention curves are not validated measurements)."""
+    x, ha = (0.985, "right") if "right" in loc else (0.015, "left")
+    y, va = (0.03, "bottom") if "lower" in loc else (0.97, "top")
+    ax.text(x, y, "illustrative · convention, not validated", transform=ax.transAxes,
+            ha=ha, va=va, fontsize=7.2, color="#9a9992", style="italic",
+            bbox=dict(boxstyle="round,pad=0.25", fc="#f4f4f1", ec="#dcdcd6", lw=0.6))
+
+
 def save(fig, name):
     fig.tight_layout()
-    for ext in ("svg", "png"):
+    for ext in ("svg", "png", "pdf"):     # vector (svg/pdf) + raster (png)
         fig.savefig(os.path.join(HERE, f"{name}.{ext}"),
                     dpi=200, bbox_inches="tight")
     plt.close(fig)
-    print(f"wrote {name}.svg / .png")
+    print(f"wrote {name}.svg / .png / .pdf")
 
 
 # ---------------------------------------------------------------------------
@@ -127,19 +137,39 @@ HRSS = hr_ss(P_STEADY)
 # 1. F — residual cardiovascular-drift state (the acute-fatigue engine)
 # ===========================================================================
 def fig_F():
-    t = np.linspace(0, 180, 400)                      # minutes
+    # Integrate F(t) explicitly so the CHARGE (heavy effort) AND the RECOVERY
+    # relaxation (coast: κ_d gated off, F decays via τ_rec) are both drawn — the
+    # relaxation is the behaviour that distinguishes F from a monotonic time-ramp.
     charge = KAPPA_I * max(0.0, P_STEADY + 40 - P_AET) + KAPPA_D
     f_ss = charge * TAU_REC
-    f_t = f_ss * (1 - np.exp(-(t * 60) / TAU_REC))
-    # a recovery tail: stop pedalling at 150 min -> F relaxes
-    fig, ax = plt.subplots(figsize=(6.2, 3.7))
-    ax.plot(t, f_t, color=BLUE, lw=2.2)
+    coast_start = 120.0                               # min: stop pedalling (inactive)
+    dt = 1.0                                          # s
+    n = int(180 * 60)
+    f = 0.0
+    ts, fs = [], []
+    for i in range(n):
+        tmin = i / 60.0
+        active = tmin < coast_start
+        ch = charge if active else 0.0               # κ_d gated on active only
+        f += (ch - f / TAU_REC) * dt
+        if i % 60 == 0:
+            ts.append(tmin); fs.append(f)
+    ts, fs = np.array(ts), np.array(fs)
+    fig, ax = plt.subplots(figsize=(6.4, 3.7))
+    ax.axvspan(coast_start, 180, color=GOOD, alpha=0.07)
+    ax.plot(ts, fs, color=BLUE, lw=2.3)
     ax.axhline(f_ss, color=MUTED, lw=1, ls=":", zorder=1)
     ax.text(4, f_ss + 0.15, f"F_ss = charge·τ_rec ≈ {f_ss:.1f} bpm", color=MUTED, fontsize=8.5)
+    ax.axvline(coast_start, color=GREEN, ls="--", lw=1.1)
+    ax.text(coast_start + 2, fs.max() * 0.55, "coast / stop\n(κ_d off → F relaxes)",
+            color=GREEN, fontsize=8.3, va="center")
+    ax.text(60, fs[10] * 0.5, "charge\n(heavy effort)", color=MUTED, fontsize=8.3,
+            ha="center", va="center")
     ax.set_title("Residual cardiovascular-drift state  F")
-    ax.set_xlabel("time on task at a heavy-domain effort (min)")
+    ax.set_xlabel("time on task (min)")
     ax.set_ylabel("F  (bpm of unexplained HR drift)")
-    _eqn(ax, r"dF/dt = [κ_i·max(0,P−P_AeT) + κ_d] − F/τ_rec")
+    ax.set_ylim(0, f_ss * 1.15)
+    _eqn(ax, r"dF/dt = [κ_i·max(0,P−P_AeT) + κ_d(active)] − F/τ_rec")
     _style(ax)
     save(fig, "01_F_drift_state")
 
@@ -165,6 +195,7 @@ def fig_AFI():
     ax.set_ylim(0, 100)
     _eqn(ax, r"AFI = 100 · clamp(F / F_ref, 0, 1)")
     _fatigue_arrow(ax)
+    _illustrative(ax, "upper left")
     _style(ax)
     save(fig, "02_AFI_index")
 
@@ -174,32 +205,37 @@ def fig_AFI():
 # ===========================================================================
 def fig_alpha1():
     fig, (axL, axR) = plt.subplots(1, 2, figsize=(9.6, 3.9))
-    # (a) population power->α1 sigmoid
+    # (a) population power->α1 sigmoid. The 0.75 crossing at P_AeT is a genuine
+    # anchor; 0.50 is only the P→∞ LOWER ASYMPTOTE of the sigmoid, NOT a finite
+    # threshold crossing (white paper §9: the 0.5 anchor is weak — not a band
+    # boundary). Draw 0.75 as an anchor line, 0.50 as an asymptote guide only.
     p = np.linspace(0.35 * FTP, 1.35 * FTP, 400)
     axL.plot(p, a1_target(p), color=BLUE, lw=2.3)
-    for yv, lbl in [(AET_A1, "AeT anchor 0.75"), (ANT_A1, "AnT anchor 0.50")]:
-        axL.axhline(yv, color=MUTED, ls=":", lw=1)
-        axL.text(p[0], yv + 0.01, lbl, color=MUTED, fontsize=8)
+    axL.axhline(AET_A1, color=MUTED, ls=":", lw=1)
+    axL.text(p[0], AET_A1 + 0.012, "0.75 AeT anchor (crossed at P_AeT)", color=MUTED, fontsize=8)
+    axL.axhline(ANT_A1, color=MUTED, ls=(0, (1, 3)), lw=0.9)
+    axL.text(p[0], ANT_A1 + 0.012, "0.50 lower asymptote (P → ∞, not an anchor)",
+             color="#a8a7a0", fontsize=8, style="italic")
     axL.axvline(P_AET, color=GREEN, ls="--", lw=1.2)
     axL.text(P_AET + 4, 1.02, "P_AeT", color=GREEN, fontsize=8.5)
     axL.set_title("(a)  Power → DFA-α1 map")
     axL.set_xlabel("power (W)  →  increasing intensity")
     axL.set_ylabel("DFA-α1")
-    axL.set_ylim(0.35, 1.08)
-    _eqn(axL, r"A1_target(P) = a0 − a1/(1+e^{−s(P−P_AeT)})")
+    axL.set_ylim(0.42, 1.08)
+    _eqn(axL, r"A1_target(P) = a0 − a1/(1+e^{−s(P−P_AeT)}),  a0=1.0, a1=0.5")
     _style(axL)
-    # (b) α1 drift below baseline-for-power as fatigue rises
+    # (b) α1 drift below baseline-for-power as fatigue rises (single clean annotation)
     a1_fat = a1_target(P_STEADY) - C_F * F
     axR.axhline(a1_target(P_STEADY), color=MUTED, ls=":", lw=1)
-    axR.text(0.2, a1_target(P_STEADY) + 0.006, "baseline-for-power (fresh)", color=MUTED, fontsize=8)
+    axR.text(0.2, a1_target(P_STEADY) + 0.008, "baseline-for-power (fresh)", color=MUTED, fontsize=8)
     axR.plot(F, a1_fat, color=BLUE, lw=2.3)
-    axR.annotate("drift below baseline\n= fatigue signal", xy=(F[-1] * 0.8, a1_fat[int(len(F)*0.8)]),
-                 xytext=(F[-1] * 0.30, a1_fat[-1] - 0.02), color=INK2, fontsize=8.5,
+    axR.annotate("drift below baseline = fatigue signal",
+                 xy=(F[-1] * 0.86, a1_fat[int(len(F) * 0.86)]),
+                 xytext=(F[-1] * 0.06, a1_fat[-1] + 0.008), color=INK2, fontsize=8.5,
                  arrowprops=dict(arrowstyle="-|>", color=MUTED, lw=1.2))
     axR.set_title("(b)  α1 drift with fatigue (fixed power)")
     axR.set_xlabel("fatigue state  F  (bpm)")
     axR.set_ylabel("DFA-α1")
-    _eqn(axR, r"α1 = A1_target(P) − c_F · F")
     _fatigue_arrow(axR)
     _style(axR)
     save(fig, "03_DFA_alpha1")
@@ -224,6 +260,7 @@ def fig_decoupling():
     ax.set_ylabel("decoupling %")
     _eqn(ax, r"decoupling% = (EF_base − EF)/EF_base ·100 = 100·F/(HR_ss+F)")
     _fatigue_arrow(ax)
+    _illustrative(ax, "lower right")
     _style(ax)
     save(fig, "04_decoupling")
 
@@ -252,9 +289,13 @@ def fig_ef():
 def fig_hr():
     hr = HRSS + F
     fig, ax = plt.subplots(figsize=(6.2, 3.7))
+    ax.set_ylim(HRSS - 3.0, hr.max() + 1.5)            # headroom so labels don't collide
     ax.plot(F, hr, color=BLUE, lw=2.4)
     ax.axhline(HRSS, color=MUTED, ls=":", lw=1)
-    ax.text(0.2, HRSS + 0.4, "HR_ss (fresh HR for this power)", color=MUTED, fontsize=8)
+    # place the HR_ss note to the RIGHT of the plot, above its line — clear of the
+    # equation annotation in the lower-left.
+    ax.text(F[-1] * 0.98, HRSS + 0.6, "HR_ss  (fresh HR for this power)",
+            color=MUTED, fontsize=8, ha="right", va="bottom")
     ax.set_title("Heart rate at fixed power")
     ax.set_xlabel("fatigue state  F  (bpm)")
     ax.set_ylabel("HR  (bpm)")
@@ -268,15 +309,29 @@ def fig_hr():
 # 7. Cadence drift (corroborating vote)
 # ===========================================================================
 def fig_cadence():
+    # A WEAK corroborator, not a law: Barsumyan found cadence decline r≈0.40 (~16%
+    # variance), direction-ambiguous (cadence→decoupling, not fatigue→cadence), no
+    # threshold, observed magnitude only ~2%. Render it as a low-confidence CLOUD
+    # around a faint mean trend, not a clean deterministic line.
+    rng = np.random.default_rng(11)
     phi = F / F_REF
-    drift = 6.0 * phi                                   # % cadence decline (corroborator)
+    mean_trend = 2.0 * phi                              # ~2% observed at end-of-hard-ride
+    # scatter with SD ≈ mean -> r²≈0.16 (r≈0.40)
+    fsamp = np.linspace(0.3, 1.1, 60) * F_REF
+    ph = fsamp / F_REF
+    obs = 2.0 * ph + rng.normal(0, 1.4, len(fsamp))
     fig, ax = plt.subplots(figsize=(6.2, 3.7))
-    ax.plot(F, drift, color=BLUE, lw=2.4)
-    ax.set_title("Cadence drift  (corroborating vote)")
+    ax.axhline(0, color=MUTED, lw=0.8)
+    ax.scatter(fsamp, obs, s=16, color=BLUE, alpha=0.45, edgecolor="none",
+               label="per-rider observations (r≈0.40)")
+    ax.plot(F, mean_trend, color=BLUE, lw=1.6, ls="--", label="mean trend (~2% at F_ref)")
+    ax.set_title("Cadence decline  (weak corroborator)")
     ax.set_xlabel("fatigue state  F  (bpm)")
     ax.set_ylabel("cadence decline  (%)")
-    _eqn(ax, r"~0.6% decoupling per rpm (r≈0.40) — low-weight corroborator")
+    ax.legend(loc="upper left", fontsize=8)
+    _eqn(ax, r"r≈0.40 (~16% variance), direction-ambiguous, no threshold — low weight")
     _fatigue_arrow(ax)
+    _illustrative(ax, "lower right")
     _style(ax)
     save(fig, "07_cadence_drift")
 
@@ -328,19 +383,45 @@ def fig_wbal():
 # ===========================================================================
 # 9. Intensity-weighted kJ — the durability clock
 # ===========================================================================
+def _weight_for_power(p):
+    if p <= CP:
+        return 1.0
+    return 1.0 + min(max((p - CP) / CP, 0.0), 1.0) * 2.0    # 1× at CP → 3× at 2·CP
+
+
 def fig_kj():
-    t = np.linspace(0, 4.0, 400)                        # hours
-    kj = P_STEADY * (t * 3600) / 1000.0                 # weight 1 below CP
-    fig, ax = plt.subplots(figsize=(6.4, 3.7))
-    ax.plot(t, kj, color=BLUE, lw=2.4)
-    for anch, lbl, c in [(KJ_ANCHOR_LOW, "developing anchor ~1500 kJ", WARN),
+    # Use a MIXED profile with supra-CP surges so the intensity weighting is
+    # actually exercised (a sub-CP steady ride has w≡1 and the weighting is
+    # invisible). Plot raw vs intensity-weighted kJ — they diverge on the surges.
+    dt = 1.0
+    T = int(4.0 * 3600)
+    rng = np.random.default_rng(3)
+    raw = 0.0; wtd = 0.0
+    ts, raws, wtds = [], [], []
+    for i in range(T):
+        # tempo base ~0.8·FTP with repeated ~5-min supra-threshold surges @ 1.25·CP
+        surge = (i % 1200) < 300
+        p = (1.25 * CP if surge else 0.80 * FTP) + rng.normal(0, 5)
+        p = max(0.0, p)
+        raw += p * dt / 1000.0
+        wtd += _weight_for_power(p) * p * dt / 1000.0
+        if i % 60 == 0:
+            ts.append(i / 3600.0); raws.append(raw); wtds.append(wtd)
+    ts, raws, wtds = np.array(ts), np.array(raws), np.array(wtds)
+    fig, ax = plt.subplots(figsize=(6.6, 3.9))
+    ax.plot(ts, wtds, color=BLUE, lw=2.4, ls="-", label="intensity-weighted kJ (durability clock)")
+    ax.plot(ts, raws, color=MUTED, lw=1.8, ls="--", label="raw kJ (volume only)")
+    ax.text(ts[-1] * 0.62, (wtds[int(len(ts)*0.62)] + raws[int(len(ts)*0.62)]) / 2,
+            "weighting\ndiverges on\nsupra-CP surges", color=INK2, fontsize=8, ha="center")
+    for anch, lbl, c in [(KJ_ANCHOR_LOW, "developing anchor ~1500 kJ", "#a9760a"),
                          (KJ_ANCHOR_HIGH, "trained anchor ~2500 kJ", CRIT)]:
-        ax.axhline(anch, color=c, ls="--", lw=1.2)
+        ax.axhline(anch, color=c, ls=":", lw=1.1)
         ax.text(0.05, anch + 40, lbl, color=c, fontsize=8.3, weight="bold")
     ax.set_title("Intensity-weighted kJ — durability clock")
     ax.set_xlabel("time on task (h)  →  accumulating work")
-    ax.set_ylabel("kJ_weighted")
-    _eqn(ax, r"kJ_w = Σ w(P)·P·Δt/1000,  w=1 below CP → ~3× well above CP")
+    ax.set_ylabel("kJ")
+    ax.legend(loc="lower right", fontsize=8.5)
+    _eqn(ax, r"kJ_w = Σ w(P)·P·Δt/1000,  w=1 below CP → ~3× at 2·CP")
     _style(ax)
     save(fig, "09_kj_durability_clock")
 
@@ -395,7 +476,9 @@ def fig_rmssd():
     ax.fill_between(days, roll - sd, roll + sd, color=BLUE, alpha=0.12, label="personal baseline ±1 SD")
     ax.plot(days, roll, color=MUTED, lw=1.3, ls="--", label="7-day rolling baseline")
     ax.plot(days, rmssd, color=BLUE, lw=1.9, label="morning RMSSD")
-    flag = rmssd < (roll - sd)
+    # flag only the SUSTAINED below-band run (single dips are noise, not a flag)
+    below = rmssd < (roll - sd)
+    flag = below & (days >= 15)
     ax.plot(days[flag], rmssd[flag], "o", color=CRIT, ms=6, zorder=5)
     ax.text(0.98, 0.06, "sustained decline below −1 SD → overreaching flag",
             transform=ax.transAxes, ha="right", color=CRIT, fontsize=8.3, weight="bold")
@@ -403,6 +486,7 @@ def fig_rmssd():
     ax.set_xlabel("day  →  accumulating residual fatigue")
     ax.set_ylabel("RMSSD  (ms)")
     ax.legend(loc="upper right")
+    _illustrative(ax, "lower left")
     _style(ax)
     save(fig, "11_rmssd_baseline")
 
@@ -415,15 +499,14 @@ def fig_feat_attrition():
     feat = 100 * x ** 1.4                               # bought with output
     attr = 100 * x ** 1.9                               # bought with drift
     fig, ax = plt.subplots(figsize=(6.4, 3.7))
-    ax.plot(x, feat, color=YELLOW, lw=2.4, ls="-", label="FeatScore (output-bought)")
-    ax.plot(x, attr, color=RED, lw=2.4, ls="--", label="AttritionScore (drift-bought)")
-    ax.text(x[-1] * 1.005, feat[-1], "Feat", color="#a9760a", fontsize=9.5, va="center", weight="bold")
-    ax.text(x[-1] * 1.005, attr[-1], "Attrition", color=RED, fontsize=9.5, va="center", weight="bold")
-    ax.legend(loc="upper left")
+    ax.plot(x, feat, color=YELLOW, lw=2.4, ls="-", label="FeatScore (output-bought red)")
+    ax.plot(x, attr, color=RED, lw=2.4, ls="--", label="AttritionScore (drift-bought red)")
+    ax.legend(loc="upper left")   # identity via legend + line style (no end-labels)
     ax.set_title("Feat of Strength vs Attrition  (context, not a gate)")
-    ax.set_xlabel("high-fatigue effort  →  deeper red")
+    ax.set_xlabel("high-fatigue effort  →  more accumulated fatigue")
     ax.set_ylabel("score (arb. units)")
     _eqn(ax, "Feat ∝ kJ>CP + severe-time + matches;  Attrition ∝ drift past anchor")
+    _illustrative(ax, "lower right")
     _style(ax)
     save(fig, "12_feat_vs_attrition")
 
@@ -444,19 +527,25 @@ def fig_overview():
         (F, dec, "Decoupling %", "F (bpm)", "%", True),
         (F, ef, "Efficiency Factor", "F (bpm)", "W/bpm", False),
         (F, hr, "HR at fixed power", "F (bpm)", "bpm", False),
-        (F, 6 * F / F_REF, "Cadence drift %", "F (bpm)", "%", False),
+        (F, 2 * F / F_REF, "Cadence decline % (weak)", "F (bpm)", "%", False),
     ]
     for ax, (xx, yy, title, xl, yl, up) in zip(axs.flat[:6], panels):
         ax.plot(xx, yy, color=BLUE, lw=2.0)
         ax.set_title(title, fontsize=11)
         ax.set_xlabel(xl, fontsize=8.5); ax.set_ylabel(yl, fontsize=8.5)
         _style(ax)
-    # kJ clock
-    t = np.linspace(0, 4, 200); kj = P_STEADY * t * 3600 / 1000
-    axs.flat[6].plot(t, kj, color=BLUE, lw=2.0)
-    axs.flat[6].axhline(2000, color=CRIT, ls="--", lw=1)
+    # kJ clock — weighted vs raw on a mixed/supra-CP profile (weighting visible)
+    tt = np.linspace(0, 4, 240)
+    p_series = np.where((np.arange(len(tt)) % 60) < 15, 1.25 * CP, 0.80 * FTP)
+    dts = (tt[1] - tt[0]) * 3600
+    wraw = np.cumsum(p_series) * dts / 1000
+    wwtd = np.cumsum([_weight_for_power(p) * p for p in p_series]) * dts / 1000
+    axs.flat[6].plot(tt, wwtd, color=BLUE, lw=2.0, label="weighted")
+    axs.flat[6].plot(tt, wraw, color=MUTED, lw=1.6, ls="--", label="raw")
+    axs.flat[6].axhline(2000, color=CRIT, ls=":", lw=1)
     axs.flat[6].set_title("kJ durability clock", fontsize=11)
     axs.flat[6].set_xlabel("h", fontsize=8.5); axs.flat[6].set_ylabel("kJ", fontsize=8.5)
+    axs.flat[6].legend(fontsize=7.5, loc="upper left")
     _style(axs.flat[6])
     # CTL/ATL/TSB
     days = np.arange(0, 42); ctl = np.zeros(42); atl = np.zeros(42); ctl[0] = atl[0] = 70

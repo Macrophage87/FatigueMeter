@@ -160,7 +160,7 @@ is hard-coded as if validated).
 | `decoupRef` | 8 % | synthesis — AFI-decoupling common-scale ref (§4.5) |
 | `seedA / seedB / seedTsbScale` | 0.6 / 0.4 / 30 | synthesis — start-of-ride seeding map (§7) |
 | `featWSev / featMatchW / featBestW / attrDriftW` | 0.02 / 40 / 30 / 100 | synthesis — Feat/Attrition weights (§8.2, off critical path) |
-| `gP / a0 / a1 / sigmoidS` | 0.15 / 1.1 / 0.6 / 0.02 | synthesis — now in the settings UI |
+| `gP / a0 / a1 / sigmoidS` | 0.45 / 1.0 / 0.5 / 0.02 | synthesis — now in the settings UI (gP/sigmoid harness-corrected, see §16–17) |
 | `qHr / qHrLat / qA1 / qF / rHr / rA1` | see file | hand-set Q/R — now in the settings UI |
 | `powerCvGate / coastFracGate` | 0.10 / 0.10 | steadiness/stationarity gate — now in the settings UI |
 | `decoupOk / decoupCaution / decoupHigh` | 5 / 8 / 10 % | convention (Friel) |
@@ -174,8 +174,8 @@ is hard-coded as if validated).
 | `kappaI / kappaD` | 1.45e-4 / 2.8e-3 | synthesis; hand-set |
 | `cF` | 0.0167 | synthesis; unvalidatable cross-signal gain |
 | `fRef` | 12 bpm | synthesis; **AFI linear in 1/F_ref** — sets the whole scale |
-| `a0 / a1 / sigmoidS` | 1.1 / 0.6 / 0.02 | population map, **not universal** |
-| `gP` | 0.15 bpm/W | static gain estimate |
+| `a0 / a1 / sigmoidS` | 1.0 / 0.5 / 0.02 | population map, **not universal**; crosses 0.75 at P_AeT (§17) |
+| `gP` | 0.45 bpm/W | static gain estimate (harness-corrected from 0.15, §16) |
 | `qHr / qHrLat / qA1 / qF / rHr / rA1` | see file | hand-set; no on-bike ground truth |
 | `positivePilot` | false | **release gate** for the numeric AFI (§8.1) |
 | `shipNumberOverride` | false | explicit pre-pilot numeric-AFI exception (§8.1) |

@@ -4,7 +4,8 @@ Each figure models how **one fatigue variable behaves as fatigue increases**,
 drawn directly from the model equations in [`../white-paper.md`](../white-paper.md)
 (§3–§5, corrected Rev-3 seed values) and the evidence in
 [`../literature-review.md`](../literature-review.md). Every figure is provided in
-**vector (`.svg`)** and **raster (`.png`)** form.
+**vector (`.svg`, `.pdf`)** and **raster (`.png`)** form — the `.pdf` is what the
+LaTeX paper (`../paper/fatiguemeter.tex`) includes.
 
 > **Honesty caveat (white paper §10):** these curves are **illustrative of the
 > modelled behaviour** — shapes and directions, not calibrated magnitudes. The

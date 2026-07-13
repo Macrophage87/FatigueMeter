@@ -39,6 +39,7 @@ constant with no provenance is a defect. All defaults live in
 | `DURABILITY_MIN_S` | Constants.mc | 3600 s | durability advisory §6 | Maunder/Stevens (timing) | High | Advisory needs ≥60–90 min work |
 | `DFA_WINDOW_S / RECOMPUTE_S / BOX_MIN/MAX` | Constants.mc | 120 / 5 / 4 / 16 | DFA pipeline §3.3 | Rogers/Gronwald | High | Pipeline convention (2-min window, 5-s recompute, boxes 4–16) |
 | `ARTIFACT_GOOD` (+ `artifactGate`) | Constants.mc / props | 1 % / 5 % | RR-quality weight §4.5 / artifact gate §3.3 | Rogers/Gronwald | High | w_rr breakpoints; hard artifact gate default 5% (prefer <3%) |
+| `RR_STALE_S` | Constants.mc / PrimitivesCalculator.mc | 10 s | graceful degradation §8.4 (staleness timer) | white-paper §8.4 | n/a | Engineering timeout: no fresh RR for this long → α1 marked unavailable (don't emit a stale α1 off an aged buffer), reacquire cleanly |
 | `F0_SEED f()` | TrainingLoadLedger.seedFatigueBpm | ATL/TSB/RMSSD→bpm | seeding §7 | Synthesis | n/a | Cross-domain, uncited; presented as **coarse bucket**, not a point |
 | `PROJECTED_AFI` (range) | FatigueMeterView.drawDial | now ± AFI uncertainty | dial §8.1 | Synthesis | n/a | Forecast; **gated on pilot; rendered as a shaded range**, not a hard tick |
 | Feat/Attrition weights | EffortCharacterizer.mc | arbitrary | §8.2 red-typing | Synthesis | n/a | No labeled data, no error rate; **off the advisory critical path** |

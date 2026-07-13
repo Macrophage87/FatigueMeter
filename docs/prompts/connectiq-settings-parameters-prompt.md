@@ -102,9 +102,9 @@ Format: `# | Display title (exact) | property id | control | min | max | default
 
 | # | Display title (exact) | property id | control | min | max | default |
 |---|---|---|---|---|---|---|
-| 30 | `g_P gain (bpm/W)` | `gP` | numeric | 0.05 | 0.4 | 0.15 (float) |
-| 31 | `Sigmoid a0` | `a0` | numeric | 0.8 | 1.5 | 1.1 (float) |
-| 32 | `Sigmoid a1` | `a1` | numeric | 0.2 | 1.2 | 0.6 (float) |
+| 30 | `g_P gain (bpm/W)` | `gP` | numeric | 0.1 | 0.9 | 0.45 (float) |
+| 31 | `Sigmoid a0` | `a0` | numeric | 0.8 | 1.5 | 1.0 (float) |
+| 32 | `Sigmoid a1` | `a1` | numeric | 0.2 | 1.2 | 0.5 (float) |
 | 33 | `Sigmoid slope s` | `sigmoidS` | numeric | 0.005 | 0.1 | 0.02 (float) |
 | 34 | `Q HR_ss` | `qHr` | numeric | 0.01 | 5 | 0.5 (float) |
 | 35 | `Q HR` | `qHrLat` | numeric | 0.01 | 5 | 0.5 (float) |
