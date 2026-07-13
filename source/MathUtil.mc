@@ -86,7 +86,7 @@ module MathUtil {
         var z = -s * (p - pAeT);
         if (z > 60.0) { z = 60.0; }       // guard exp overflow
         if (z < -60.0) { z = -60.0; }
-        var denom = 1.0 + Math.exp(z);
+        var denom = 1.0 + Math.pow(2.718281828459045, z);
         return a0 - a1 / denom;
     }
 }

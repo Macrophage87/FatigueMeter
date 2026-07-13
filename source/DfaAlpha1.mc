@@ -46,7 +46,7 @@ module DfaAlpha1 {
         return (s[n / 2 - 1] + s[n / 2]) / 2.0;
     }
 
-    hidden function sortCopy(arr) {
+    function sortCopy(arr) {
         var a = [];
         for (var i = 0; i < arr.size(); i++) { a.add(arr[i]); }
         // insertion sort (arrays are small: a 2-min window is ~120-260 beats,

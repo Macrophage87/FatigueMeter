@@ -111,7 +111,7 @@ class FatigueMeterView extends WatchUi.DataField {
 
     //! Beat-to-beat RR callback. Buffers intervals for the next compute(); guarded
     //! so a malformed packet never disturbs the compute loop.
-    function onSensorData(sensorData) {
+    function onSensorData(sensorData as Toybox.Sensor.SensorData) as Void {
         try {
             if (sensorData == null) { return; }
             var arr = null;

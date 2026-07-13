@@ -13,7 +13,7 @@ using Toybox.Application.Storage;
 //! NOT validate the latent F/AFI magnitude (there is no on-bike fatigue truth).
 module CalibrationFit {
 
-    hidden const KEY = "fm_calib_v1";
+    const KEY = "fm_calib_v1";
 
     //! Fit from paired (power, alpha1) samples. Returns a dictionary:
     //!   :accepted bool (R²>0.75), :r2, :pAeT, :slope, :a0, :a1, :s

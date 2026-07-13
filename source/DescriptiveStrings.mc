@@ -43,7 +43,7 @@ module DescriptiveStrings {
         return load(Rez.Strings.BucketModerate);
     }
 
-    hidden function load(res) {
+    function load(res) {
         try { return WatchUi.loadResource(res); } catch (e) { return ""; }
     }
 }

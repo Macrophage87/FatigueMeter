@@ -12,7 +12,7 @@ using Toybox.Math;
 //! not external validity.
 module PureFunctionTests {
 
-    hidden function near(a, b, tol) {
+    function near(a, b, tol) {
         var d = a - b;
         if (d < 0) { d = -d; }
         return d <= tol;

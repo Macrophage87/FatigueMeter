@@ -1,0 +1,10 @@
+# Connect IQ build artifacts (the store deliverable lives in store/ and IS committed)
+bin/
+*.prg
+*.prg.debug.xml
+*.iq.debug.xml
+
+# Developer signing keys must NEVER be committed
+*.der
+*.pem
+developer_key.*

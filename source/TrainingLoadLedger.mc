@@ -75,7 +75,7 @@ class TrainingLoadLedger {
         if (hrr > 1.0) { hrr = 1.0; }
         var z = expo * hrr;
         if (z > 60.0) { z = 60.0; }
-        return (dt / 60.0) * hrr * coeff * Math.exp(z);
+        return (dt / 60.0) * hrr * coeff * Math.pow(2.718281828459045, z);
     }
 
     //! CTL/ATL EWMA fold: new = prev + (load − prev)/tau (white paper §5).
