@@ -41,9 +41,9 @@ class FatigueMeterView extends WatchUi.DataField {
     hidden var dKjw;
     hidden var dKjTotal;
     hidden var dWmatches;
+    hidden var dBest1;
     hidden var dBest5;
-    hidden var dTsb;
-    hidden var dStartBucket;
+    hidden var dBest20;
     hidden var dNumericUnlocked;
     hidden var dCalibrated;
     hidden var dSourceSwitched;
@@ -77,7 +77,7 @@ class FatigueMeterView extends WatchUi.DataField {
         dAlpha1 = Signals.Metric.unavailable("no RR");
         dArtifact = null;
         dKjw = 0.0; dKjTotal = 0.0; dWmatches = 0;
-        dBest5 = 0.0; dTsb = ledger.tsb(); dStartBucket = ledger.startBucket();
+        dBest1 = 0.0; dBest5 = 0.0; dBest20 = 0.0;
         dNumericUnlocked = cfg.numericAfiUnlocked();
         dCalibrated = CalibrationFit.isCalibrated();
         dSourceSwitched = false;
@@ -190,7 +190,9 @@ class FatigueMeterView extends WatchUi.DataField {
         // ---- effort characterizer (off the critical path) ----
         effort.setKjAboveCp(prims.kjAboveCp());
         effort.update(power, prims.wBalFraction(), decoupVal, a1DriftBelow, prims.kjWeightedValue());
+        dBest1 = effort.best1();
         dBest5 = effort.best5();
+        dBest20 = effort.best20();
         dWmatches = effort.matchesBurned();
         var freshMatch = (effort.matchesBurned() > lastFreshMatchCount);
         lastFreshMatchCount = effort.matchesBurned();
@@ -203,8 +205,11 @@ class FatigueMeterView extends WatchUi.DataField {
         dKjw = prims.kjWeightedValue();
         var kjt = prims.kjTotalMetric();
         dKjTotal = kjt.isPresent() ? kjt.value : 0.0;
-        dTsb = ledger.tsb();
-        dStartBucket = ledger.startBucket();
+        // Layer 3 (CTL/ATL/TSB) still folds silently into the ledger for the post-
+        // ride FIT/summary export and the internal F(0) seed, but is no longer
+        // surfaced on the in-ride glance: the field only sees the rides it happens
+        // to run, so an in-ride TSB/start-form readout can't be kept honest — that
+        // record lives in the training-load platform, not here.
 
         var wRr = AcuteFatigueFilter.rrWeight(prims.alpha1Artifact(),
                      Constants.ARTIFACT_GOOD, cfg.artifactGate);
@@ -341,7 +346,7 @@ class FatigueMeterView extends WatchUi.DataField {
                     Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
-    //! 2. Acute Fatigue dial. Pre-pilot: 3-state band + coarse start/now. Post-
+    //! 2. Acute Fatigue dial. Pre-pilot: 3-state band + coarse now marker. Post-
     //! pilot: precise AFI digit + now tick + shaded projection range.
     hidden function drawDial(dc, w, h, y, dialH) {
         var pad = (w * 0.06).toNumber();
@@ -357,12 +362,6 @@ class FatigueMeterView extends WatchUi.DataField {
         dc.fillRectangle(pad + seg, barY, seg, barH);
         dc.setColor(0xCC2222, Graphics.COLOR_TRANSPARENT);
         dc.fillRectangle(pad + 2 * seg, barY, barW - 2 * seg, barH);
-
-        // coarse "start" marker from the start bucket
-        var startPos = bucketToX(dStartBucket, pad, barW);
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(startPos, barY - barH, Graphics.FONT_XTINY, "S",
-                    Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
 
         if (dNumericUnlocked && dAfi != null) {
             // POST-PILOT: precise AFI digit + now tick + projection range
@@ -454,26 +453,25 @@ class FatigueMeterView extends WatchUi.DataField {
                     Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
-    //! 4. Feats strip: best 5-min power, matches, TSB / start-fatigue context.
+    //! 4. Feats strip: best 1 / 5 / 20-min power — the in-ride "feats". These are
+    //! ride-scoped efforts the field measures directly, unlike the training-scale
+    //! TSB / start-form context that was dropped from the glance (§5): the field
+    //! can't keep an honest CTL/ATL from only the rides it runs, so that record
+    //! belongs to the training-load platform, not to a per-ride readout.
     hidden function drawFeatsStrip(dc, w, h, y, rowH) {
         var cellW = w / 3;
-        // best-5 is power-dependent: grey with "no power" when the meter is absent.
-        if (dPowerAvail) {
-            drawCell(dc, 0, y, cellW, rowH, "BEST 5min",
-                     dBest5.format("%.0f") + "W", 0xFFCC33);
-        } else {
-            drawCell(dc, 0, y, cellW, rowH, "BEST 5min", "no power", 0x777777);
-        }
-        drawCell(dc, cellW, y, cellW, rowH, "TSB",
-                 dTsb.format("%.0f"), tsbColor(dTsb));
-        drawCell(dc, 2 * cellW, y, cellW, rowH, "START",
-                 DescriptiveStrings.startBucketLabel(dStartBucket), Graphics.COLOR_WHITE);
+        drawBestCell(dc, 0, y, cellW, rowH, "BEST 1min", dBest1);
+        drawBestCell(dc, cellW, y, cellW, rowH, "BEST 5min", dBest5);
+        drawBestCell(dc, 2 * cellW, y, cellW, rowH, "BEST 20min", dBest20);
     }
 
-    hidden function tsbColor(tsb) {
-        if (tsb < cfg.tsbOverreach) { return 0xCC2222; }
-        if (tsb > cfg.tsbFresh) { return 0x2E9E2E; }
-        return 0xD9A400;
+    //! Best-power cell — power-dependent: grey with "no power" when absent.
+    hidden function drawBestCell(dc, x, y, cw, ch, title, watts) {
+        if (dPowerAvail) {
+            drawCell(dc, x, y, cw, ch, title, watts.format("%.0f") + "W", 0xFFCC33);
+        } else {
+            drawCell(dc, x, y, cw, ch, title, "no power", 0x777777);
+        }
     }
 
     //! 5. Data-quality footer: artifact %/α1 validity + stationarity + fallback +
