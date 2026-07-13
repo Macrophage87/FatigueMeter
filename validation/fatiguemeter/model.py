@@ -39,8 +39,8 @@ TAU_HR = 30.0
 TAU_A = 90.0
 TAU_REC = 900.0
 G_P = 0.45
-SIG_A0 = 1.1
-SIG_A1 = 0.6
+SIG_A0 = 1.0   # a0/a1 set so the sigmoid midpoint crosses the 0.75 AeT anchor at
+SIG_A1 = 0.5   # P_AeT (a0 − a1/2 = 0.75); asymptotes 1.0 (rest) / 0.5 (AnT).
 SIG_S = 0.02
 KAPPA_I = 0.000145
 KAPPA_D = 0.0028
@@ -71,6 +71,7 @@ DFA_BOX_MAX = 16
 DFA_R2_GATE = 0.75
 DECOUP_REF = 8.0
 ARTIFACT_GOOD = 1.0
+RR_STALE_S = 10   # after this many seconds without a fresh RR beat, α1 -> unavailable
 
 
 @dataclass
@@ -420,10 +421,21 @@ class AcuteFatigueFilter:
         self.obs = observability_check(A, h_rows)
 
     @staticmethod
+    def _symmetrize(P):
+        # match KalmanMath.symmetrize: force symmetry + a small positive diagonal
+        # floor so P stays conditioned (a genuine divergence otherwise in
+        # degenerate cases).
+        P = 0.5 * (P + P.T)
+        for i in range(4):
+            if P[i, i] < 1e-6:
+                P[i, i] = 1e-6
+        return P
+
+    @staticmethod
     def _predict(x, P, A, u, q_diag):
         x_new = A @ x + u
         P_new = A @ P @ A.T + np.diag(q_diag)
-        P_new = 0.5 * (P_new + P_new.T)
+        P_new = AcuteFatigueFilter._symmetrize(P_new)
         return x_new, P_new
 
     @staticmethod
@@ -438,7 +450,7 @@ class AcuteFatigueFilter:
         K = PHt / S
         x_new = x + K * innov
         P_new = P - np.outer(K, PHt)
-        P_new = 0.5 * (P_new + P_new.T)
+        P_new = AcuteFatigueFilter._symmetrize(P_new)
         return x_new, P_new
 
     def _effective_r_a1(self, artifact_pct, fb_now):
@@ -595,6 +607,9 @@ class Ledger:
             self.today_tss = 0.0
 
     def finalize_ride(self, load: float, day: int) -> dict:
+        # start-of-ride form (CTL_y − ATL_y) is captured BEFORE any new-day
+        # rollover, matching TrainingLoadLedger.mc::finalizeRide.
+        start_tsb = tsb_from(self.ctl_day_base, self.atl_day_base)
         if day != self.last_day:
             self.ctl_day_base = self.ctl_current
             self.atl_day_base = self.atl_current
@@ -610,7 +625,7 @@ class Ledger:
         else:
             self.ctl_history.append((day, ctl_today))
         return {"ctl_end": ctl_today, "atl_end": atl_today,
-                "start_tsb": tsb_from(self.ctl_day_base, self.atl_day_base),
+                "start_tsb": start_tsb,
                 "tsb": tsb_from(ctl_today, atl_today), "load": load}
 
     def ctl_ramp_per_week(self, today: int) -> Optional[float]:

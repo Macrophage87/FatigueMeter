@@ -28,12 +28,15 @@ class Ride:
     label: str = ""
 
 
-def _rr_stream(hr_series, phi, artifact_frac, resp_hz, rng, resp_amp_ms=0.0):
+def _rr_stream(hr_series, phi, artifact_frac, resp_hz, rng, resp_amp_ms=0.0,
+               phi_end=None):
     """Generate a beat-to-beat RR stream (ms) covering the ride, bucketed into the
     second each beat completes. `phi` is the AR(1) coefficient of the RR
     fluctuation: high phi -> strongly-correlated dynamics -> high DFA-α1; low phi
-    -> uncorrelated -> low α1. Injects `artifact_frac` ectopic/dropped beats and a
-    respiratory (sinusoidal) modulation of amplitude resp_amp_ms."""
+    -> uncorrelated -> low α1. If `phi_end` is set, phi interpolates from `phi` to
+    `phi_end` across the ride (models a shared confound like heat lowering α1 over
+    time). Injects `artifact_frac` ectopic/dropped beats and a respiratory
+    (sinusoidal) modulation of amplitude resp_amp_ms."""
     n = len(hr_series)
     rr_by_second = [[] for _ in range(n)]
     t = 0.0
@@ -47,8 +50,9 @@ def _rr_stream(hr_series, phi, artifact_frac, resp_hz, rng, resp_amp_ms=0.0):
         if hr is None or hr <= 0:
             t += 1.0
             continue
+        phi_t = phi if phi_end is None else phi + (phi_end - phi) * (sec / n)
         base = 60000.0 / hr
-        fluct = phi * fluct + math.sqrt(max(1e-6, 1 - phi * phi)) * rng.normal(0, sigma)
+        fluct = phi_t * fluct + math.sqrt(max(1e-6, 1 - phi_t * phi_t)) * rng.normal(0, sigma)
         resp = resp_amp_ms * math.sin(2 * math.pi * resp_hz * t) if resp_amp_ms > 0 else 0.0
         rr = base + fluct + resp
         if rng.random() < artifact_frac:
@@ -84,7 +88,7 @@ def _fresh_hr(power_w, hr_rest=FRESH_HR_REST, g_p=FRESH_G_P, hr_max=190.0):
 def steady_ride(power_w=165.0, duration_s=3600, hr_drift_bpm=6.0,
                 cadence=88.0, ftp=250.0, artifact_frac=0.005, resp_hz=0.25,
                 seed=0, resp_amp_ms=0.0, hr_rest=FRESH_HR_REST, g_p=FRESH_G_P,
-                label="steady") -> Ride:
+                alpha1_drift=0.0, label="steady") -> Ride:
     rng = np.random.default_rng(seed)
     power = [float(power_w + rng.normal(0, 3)) for _ in range(duration_s)]
     fresh = _fresh_hr(power_w, hr_rest, g_p)
@@ -93,7 +97,10 @@ def steady_ride(power_w=165.0, duration_s=3600, hr_drift_bpm=6.0,
           for i in range(duration_s)]
     cad = [float(cadence + rng.normal(0, 2)) for _ in range(duration_s)]
     phi = _phi_for_intensity(power_w / ftp)
-    rr = _rr_stream(hr, phi, artifact_frac, resp_hz, rng, resp_amp_ms)
+    # alpha1_drift>0: RR correlation FALLS over the ride (α1 drifts down) — used to
+    # model a shared confound (heat) that moves α1 as well as HR.
+    phi_end = max(0.05, phi - alpha1_drift) if alpha1_drift > 0 else None
+    rr = _rr_stream(hr, phi, artifact_frac, resp_hz, rng, resp_amp_ms, phi_end)
     return Ride(power, hr, cad, rr, label)
 
 
@@ -158,9 +165,10 @@ def ramp_ride(duration_s=1200, ftp=250.0, hr0=100.0, seed=3, label="ramp") -> Ri
 
 
 def heat_ride(duration_s=5400, power_w=175.0, ftp=250.0, seed=4, label="heat") -> Ride:
-    """Hot-day ride: extra cardiac drift shared across HR and α1 (confound)."""
-    return steady_ride(power_w=power_w, duration_s=duration_s,
-                       hr_drift_bpm=20.0, ftp=ftp, seed=seed, label=label)
+    """Hot-day ride: a SHARED confound that moves BOTH channels — extra cardiac
+    drift (HR rises -> decoupling) AND falling RR correlation (α1 drifts down)."""
+    return steady_ride(power_w=power_w, duration_s=duration_s, hr_drift_bpm=20.0,
+                       ftp=ftp, seed=seed, alpha1_drift=0.35, label=label)
 
 
 def drop_channel(ride: Ride, channel: str, start_s=0, end_s=None) -> Ride:

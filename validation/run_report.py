@@ -41,6 +41,9 @@ def build_report():
     results = catalog.run_all()
     lines = [HEADER]
 
+    # Every tier EXCEPT PLAUSIBILITY is build-breaking (HARD, STRUCTURAL,
+    # ADVERSARIAL, HONESTY, CALIBRATION). A structural regression must never be
+    # able to print green.
     hard_fail = [(c, r) for c, r in results
                  if r.status == "FAIL" and c.tier != "PLAUSIBILITY"]
     lines.append("SUMMARY")
@@ -60,7 +63,7 @@ def build_report():
     for c, r in results:
         by_tier.setdefault(c.tier, []).append((c, r))
 
-    for tier in ("HARD", "ADVERSARIAL", "HONESTY", "CALIBRATION", "PLAUSIBILITY"):
+    for tier in ("HARD", "STRUCTURAL", "ADVERSARIAL", "HONESTY", "CALIBRATION", "PLAUSIBILITY"):
         rows = by_tier.get(tier, [])
         if not rows:
             continue

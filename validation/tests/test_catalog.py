@@ -23,9 +23,10 @@ def test_check(check):
     result = check.run()
     msg = f"[{check.tier}] {check.id} {check.description} -> {result.status}: {result.detail}"
     if check.tier == "PLAUSIBILITY":
-        # soft: WARN is acceptable, only a hard sub-invariant (FAIL) breaks
+        # soft: WARN is acceptable and must never fail the build
         if result.status == "WARN":
             warnings.warn(msg)
         assert result.status in ("PASS", "WARN", "SKIP"), msg
     else:
+        # HARD / STRUCTURAL / ADVERSARIAL / HONESTY / CALIBRATION are build-breaking
         assert result.status in ("PASS", "SKIP"), msg

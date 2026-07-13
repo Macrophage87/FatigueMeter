@@ -32,6 +32,9 @@ class RideOutputs:
     afi_drift: List[float] = field(default_factory=list)
     prior_dominated: List[bool] = field(default_factory=list)
     cov_pd: List[bool] = field(default_factory=list)
+    power_avail: List[bool] = field(default_factory=list)   # power tile live this second
+    hr_avail: List[bool] = field(default_factory=list)
+    cov_ff: List[float] = field(default_factory=list)       # P[F][F] — for the widening check
     nan_seen: bool = False
 
 
@@ -77,6 +80,7 @@ class RideEngine:
         self.wbal = cfg.wprime
         self.kj_weighted = 0.0
         self.last_dfa = -999
+        self.last_rr_time = -9999   # wall-clock staleness timer for RR (§8.4)
         self.cached = (0.0, 0.0, 100.0, 0.0)  # alpha, r2, artifact%, fb
 
     def _recompute_dfa(self):
@@ -165,9 +169,14 @@ class RideEngine:
                 for v in rr:
                     if v is not None and 250 < v < 2500:
                         self.rr_buf.append(v)
+                        self.last_rr_time = t
             if t - self.last_dfa >= self.DFA_RECOMPUTE:
                 self.last_dfa = t
                 self._recompute_dfa()
+            # §8.4 staleness timer: no fresh RR for RR_STALE_S -> α1 unavailable
+            # (don't keep emitting a stale α1 off an aged buffer).
+            if t - self.last_rr_time > M.RR_STALE_S:
+                self.cached = (0.0, 0.0, 100.0, 0.0)
 
             a1_val, a1_avail, art = self._alpha1_metric()
             a1_usable = a1_val if a1_avail in ("ok", "low") and a1_val is not None else None
@@ -195,6 +204,9 @@ class RideEngine:
             out.afi_drift.append(self.filt.afi_drift_above_baseline())
             out.prior_dominated.append(self.filt.prior_dominated)
             out.cov_pd.append(self.filt.covariance_is_pd())
+            out.power_avail.append(p is not None)
+            out.hr_avail.append(h is not None)
+            out.cov_ff.append(float(self.filt.P[M.S_F, M.S_F]))
             if not (np.isfinite(afi) and np.isfinite(self.filt.f_state())):
                 out.nan_seen = True
         return out

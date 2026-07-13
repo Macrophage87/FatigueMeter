@@ -5,12 +5,17 @@ pointer into docs/references.md / white-paper.md), and returns a CheckResult.
 The pytest suite and the human-readable report both consume this single catalog,
 so there is one source of truth.
 
-TIERS
+TIERS  (build-breaking tiers: HARD, STRUCTURAL, ADVERSARIAL, HONESTY, CALIBRATION)
   HARD         — definitional identity / bound; violation = FAIL (build breaks).
+  STRUCTURAL   — a DETERMINISTIC model invariant that is required by the protocol
+                 but isn't a bare identity (e.g. the α1↔F coupling is wired,
+                 respiration ≠ manufactured fatigue, F observability, recovery
+                 relaxes F). These are exactly the regressions the harness exists
+                 to catch, so a violation MUST break the build — not a soft WARN.
   ADVERSARIAL  — robustness/no-crash; violation = FAIL.
   HONESTY      — provenance/label requirement; violation = FAIL.
-  PLAUSIBILITY — direction/range the literature establishes; violation = WARN
-                 (never fails the build — the science is explicitly uncertain).
+  PLAUSIBILITY — an UNCERTAIN ensemble-level direction/range the literature
+                 establishes; violation = WARN (never fails the build).
   CALIBRATION  — calibration-dependent behaviour; violation = FAIL, except the
                  criterion-validity stub which is SKIP (owed until real data).
 """
@@ -181,6 +186,43 @@ def _c_ledger_idempotent():
                f"same-day sum matches single fold={same}; redundant fold stable={stable}")
 
 
+def _c_ewma_nonneg():
+    # §1 bound: EWMA states stay non-negative for non-negative TSS
+    cfg = M.Config()
+    led = M.Ledger(cfg, day=0)
+    rng = np.random.default_rng(1)
+    for d in range(1, 120):
+        r = led.finalize_ride(float(rng.uniform(0, 300)), d)   # one ride/day, consecutive
+        if r["ctl_end"] < 0 or r["atl_end"] < 0:
+            return CheckResult("FAIL", f"negative EWMA on day {d}: {r}")
+    return CheckResult("PASS", "CTL/ATL stay non-negative for non-negative TSS")
+
+
+def _c_sigmoid_crosses_075():
+    # STRUCTURAL: the default power->α1 sigmoid must cross the 0.75 AeT anchor at
+    # P_AeT (else the population prior and the calibrated 0.75 crossing disagree).
+    cfg = M.Config()
+    v = M.a1_target(cfg.p_aet, cfg.p_aet, cfg.a0, cfg.a1, cfg.sigmoid_s)
+    return _ok(abs(v - M.AET_ALPHA1) < 1e-6,
+               f"a1_target(P_AeT)={v:.4f} vs AET anchor {M.AET_ALPHA1}")
+
+
+def _c_covariance_widens_predict_only():
+    # STRUCTURAL (Rev-3 §3e): under a predict-only gap (all observations missing)
+    # the F covariance must GROW — displayed uncertainty widens rather than
+    # freezing a stale-confident value.
+    cfg = M.Config()
+    f = M.AcuteFatigueFilter(cfg)
+    for _ in range(120):                       # settle with observations present
+        f.step(cfg.p_aet, cfg.hr_rest + cfg.g_p * cfg.p_aet + 4, 0.8, 0.0, 0.2, True, True)
+    p_ff_before = f.P[M.S_F, M.S_F]
+    for _ in range(120):                       # predict-only: no HR, no α1
+        f.step(cfg.p_aet, None, None, 0.0, 0.2, True, True)
+    p_ff_after = f.P[M.S_F, M.S_F]
+    return _ok(p_ff_after > p_ff_before,
+               f"P[F,F] {p_ff_before:.4f} -> {p_ff_after:.4f} under predict-only gap")
+
+
 # ===========================================================================
 # §2 CONSENSUS-PLAUSIBILITY (soft: WARN on direction miss, never FAIL)
 # ===========================================================================
@@ -202,6 +244,25 @@ def _c_alpha1_vs_intensity():
         hard_means.append(_mean_alpha1_over_ride(oh))
     me, mh = np.nanmean(easy_means), np.nanmean(hard_means)
     return _warn_if(not (me > mh), f"mean α1 easy={me:.3f} > hard={mh:.3f} expected")
+
+
+def _c_alpha1_withinride_drift():
+    # §2: across an ensemble of prolonged fixed-power efforts, mean DFA-α1 tends
+    # DOWNWARD over the ride (ensemble-mean, soft — not required of every run).
+    cfg = M.Config()
+    deltas = []
+    for seed in range(4):
+        ride = S.steady_ride(power_w=180, duration_s=5400, hr_drift_bpm=10,
+                             alpha1_drift=0.25, seed=seed)
+        out = RideEngine(cfg).run(ride.power, ride.hr, ride.cadence, ride.rr_by_second)
+        early = [a for a, av in zip(out.alpha1[1000:1600], out.alpha1_avail[1000:1600])
+                 if a is not None and av != "na"]
+        late = [a for a, av in zip(out.alpha1[4600:5200], out.alpha1_avail[4600:5200])
+                if a is not None and av != "na"]
+        if early and late:
+            deltas.append(np.mean(late) - np.mean(early))
+    md = float(np.mean(deltas)) if deltas else 0.0
+    return _warn_if(not (md < 0), f"ensemble mean α1 drift over ride = {md:+.3f} (expect <0)")
 
 
 def _c_decoupling_under_drift():
@@ -355,28 +416,32 @@ def _c_training_load_realism():
     tss_1h = M.tss(3600, cfg.ftp, cfg.ftp)
     tss_3h_hard = M.tss(3 * 3600, 0.88 * cfg.ftp, cfg.ftp)   # ~230 TSS
     ok = abs(tss_1h - 100) < 1 and 200 <= tss_3h_hard <= 300
-    # CTL ramp warning fires >5-8/week
-    led = M.Ledger(cfg, day=0)
-    for d in range(28):
-        led.advance_day(d)
-        led.finalize_ride(120.0, d)   # steady solid load
-    ramp = led.ctl_ramp_per_week(27)
-    return _warn_if(not (ok and ramp is not None),
-                    f"1h@FTP={tss_1h:.0f}TSS, 3h-hard={tss_3h_hard:.0f}TSS, ramp/wk={ramp}")
+    # CTL ramp cue: a hard build block ramps CTL >5-8/week (fires); a maintenance
+    # block near CTL ramps ~0 (no cue). Check the actual convention, not just non-None.
+    hard = M.Ledger(cfg, day=0)
+    for d in range(1, 29):
+        hard.finalize_ride(160.0, d)          # solidly above CTL -> ramps up
+    ramp_hard = hard.ctl_ramp_per_week(28)
+    flat = M.Ledger(cfg, day=0)
+    for d in range(1, 29):
+        flat.finalize_ride(cfg.ctl_seed, d)   # load == CTL -> flat
+    ramp_flat = flat.ctl_ramp_per_week(28)
+    fires = ramp_hard is not None and ramp_hard > 5.0
+    quiet = ramp_flat is not None and abs(ramp_flat) < 2.0
+    return _warn_if(not (ok and fires and quiet),
+                    f"1h@FTP={tss_1h:.0f}TSS, 3h-hard={tss_3h_hard:.0f}TSS; "
+                    f"ramp hard={ramp_hard:.1f}/wk (cue fires >5), flat={ramp_flat:.1f}/wk")
 
 
 def _c_tsb_taper():
     cfg = M.Config()
     led = M.Ledger(cfg, day=0)
-    for d in range(21):                       # build block
-        led.advance_day(d)
+    for d in range(1, 22):                     # build block (consecutive days)
         led.finalize_ride(150.0, d)
-    tsb_before = led.tsb()
-    for d in range(21, 31):                   # taper: much lower load
-        led.advance_day(d)
+    tsb_before = M.tsb_from(led.ctl_current, led.atl_current)
+    for d in range(22, 32):                    # taper: much lower load
         led.finalize_ride(30.0, d)
-    led.advance_day(31)
-    tsb_after = led.tsb()
+    tsb_after = M.tsb_from(led.ctl_current, led.atl_current)
     return _warn_if(not (tsb_after > tsb_before),
                     f"TSB rises on taper: {tsb_before:.1f} -> {tsb_after:.1f}")
 
@@ -441,12 +506,24 @@ def _c_power_hr_pauses_short():
 
 
 def _c_heat_shared_confound():
+    # A hot ride is a SHARED confound that must move BOTH channels: decoupling
+    # rises AND α1 drifts down. Asserting both is what makes the point that their
+    # agreement is NOT independent corroboration (§6 heat co-driver).
     ride = S.heat_ride(duration_s=5400, seed=4)
     ok, out = _run_no_crash(ride)
-    # both decoupling and α1-drift move on a hot ride (shared confound)
-    dec_late = [d for d in out.decoup[4800:5100] if d is not None]
-    moved = (np.mean(dec_late) if dec_late else 0.0) > 1.0
-    return _ok(ok and moved, "heat: decoupling & α1 both move; no crash (shared confound)")
+    if not ok:
+        return CheckResult("FAIL", "NaN/crash on heat ride")
+    dec_early = [d for d in out.decoup[1200:1600] if d is not None]
+    dec_late = [d for d in out.decoup[4800:5200] if d is not None]
+    a1_early = [a for a, av in zip(out.alpha1[1200:1600], out.alpha1_avail[1200:1600])
+                if a is not None and av != "na"]
+    a1_late = [a for a, av in zip(out.alpha1[4800:5200], out.alpha1_avail[4800:5200])
+               if a is not None and av != "na"]
+    dec_moved = dec_late and dec_early and (np.mean(dec_late) - np.mean(dec_early)) > 1.0
+    a1_moved = a1_late and a1_early and (np.mean(a1_late) - np.mean(a1_early)) < -0.03
+    return _ok(dec_moved and a1_moved,
+               f"heat: Δdecoup=+{np.mean(dec_late)-np.mean(dec_early):.1f}%, "
+               f"Δα1={np.mean(a1_late)-np.mean(a1_early):+.3f} (both move — shared confound)")
 
 
 def _c_extreme_profiles():
@@ -460,11 +537,18 @@ def _c_extreme_profiles():
 
 
 def _c_stale_cp():
-    cfg = M.Config(cp=120)   # deliberately wrong (too low) CP
+    # A stale/wrong CP PROPAGATES into W'bal/matches/FeatScore — which is exactly
+    # why the app surfaces a data-quality caveat. Demonstrate the propagation
+    # (garbage-in changes the characterization), and that nothing crashes.
     ride = S.steady_ride(power_w=200, duration_s=600, seed=3)
-    out = RideEngine(cfg).run(ride.power, ride.hr, ride.cadence, ride.rr_by_second)
-    finite = all(math.isfinite(w) for w in out.wbal_frac)
-    return _ok(finite and not out.nan_seen, "stale CP: W'bal finite, no crash (caveat is UI-side)")
+    good = RideEngine(M.Config(cp=240)).run(ride.power, ride.hr, ride.cadence, ride.rr_by_second)
+    stale = RideEngine(M.Config(cp=120)).run(ride.power, ride.hr, ride.cadence, ride.rr_by_second)
+    finite = all(math.isfinite(w) for w in stale.wbal_frac) and not stale.nan_seen
+    # 200 W is below a 240 CP (recovers) but above a 120 CP (depletes) -> W'bal diverges
+    propagates = abs(good.wbal_frac[-1] - stale.wbal_frac[-1]) > 0.05
+    return _ok(finite and propagates,
+               f"stale CP propagates to W'bal (good={good.wbal_frac[-1]:.2f} vs "
+               f"stale={stale.wbal_frac[-1]:.2f}); no crash — hence the data-quality caveat")
 
 
 def _c_degradation_matrix():
@@ -490,6 +574,25 @@ def _c_degradation_matrix():
     r = S.drop_channel(base, "cadence")
     ok, _ = _run_no_crash(r)
     rows.append(("no_cadence", ok))
+    # stale FTP/CP -> compute with last-known, never blocks (row of the matrix)
+    ok, out = _run_no_crash(base)   # baseline finiteness
+    stale = RideEngine(M.Config(ftp=1, cp=1)).run(base.power, base.hr, base.cadence,
+                                                  base.rr_by_second)
+    rows.append(("stale_ftp_cp", not stale.nan_seen and all(math.isfinite(a) for a in stale.afi)))
+    # (c) explicit availability markers: dropped input -> its tile marked absent,
+    # not a silent zero. no-power -> power_avail False; no-RR -> α1 'na'.
+    rp = S.drop_channel(base, "power", start_s=200, end_s=400)
+    _, outp = _run_no_crash(rp)
+    marker_power = all(not outp.power_avail[i] for i in range(200, 400))
+    rr = S.drop_channel(base, "rr", start_s=200, end_s=600)
+    _, outr = _run_no_crash(rr)
+    marker_rr = all(outr.alpha1_avail[i] == "na" for i in range(450, 600))
+    rows.append(("markers", marker_power and marker_rr))
+    # (d) intermittent dropout then clean REACQUIRE: after RR returns, α1 recovers
+    rr2 = S.drop_channel(base, "rr", start_s=200, end_s=500)
+    _, outq = _run_no_crash(rr2)
+    reacquired = any(outq.alpha1_avail[i] in ("ok", "low") for i in range(700, len(base.power)))
+    rows.append(("reacquire", reacquired))
     # intermittent dropout (all channels flicker)
     p = [None if i % 7 == 0 else v for i, v in enumerate(base.power)]
     h = [None if i % 11 == 0 else v for i, v in enumerate(base.hr)]
@@ -500,7 +603,8 @@ def _c_degradation_matrix():
     ok, out = _run_no_crash(S.Ride([None]*n, [None]*n, [None]*n, [[] for _ in range(n)]))
     rows.append(("total_loss", ok and not out.nan_seen))
     failed = [name for name, good in rows if not good]
-    return _ok(not failed, f"degradation rows failing: {failed or 'none'}")
+    return _ok(not failed, f"degradation rows failing: {failed or 'none'} "
+                           "(covariance-widens is H13; markers/reacquire/stale-CP covered here)")
 
 
 # ===========================================================================
@@ -519,7 +623,30 @@ def _c_convention_settings():
     if props is None:
         return CheckResult("SKIP", "properties.xml not found on this branch")
     missing = [k for k in GATING_CONVENTION_PROPS if k not in props]
-    return _ok(not missing, f"convention/synthesis gating values as settings; missing={missing}")
+    # The protocol's real demand: changing the setting CHANGES BEHAVIOUR (not
+    # hard-coded). Drive two values of the AFI band cutoff and the decoupling ref
+    # and assert the status/AFI actually differ.
+    ride = S.steady_ride(power_w=190, duration_s=1500, hr_drift_bpm=10, seed=2)
+    afi_lo = RideEngine(M.Config(f_ref=8)).run(ride.power, ride.hr, ride.cadence,
+                                               ride.rr_by_second).afi[-1]
+    afi_hi = RideEngine(M.Config(f_ref=20)).run(ride.power, ride.hr, ride.cadence,
+                                                ride.rr_by_second).afi[-1]
+    band_lo = StatusEvaluator_band(M.Config(afi_building=40), afi=45)
+    band_hi = StatusEvaluator_band(M.Config(afi_building=80), afi=45)
+    behaves = abs(afi_lo - afi_hi) > 1.0 and band_lo != band_hi
+    return _ok(not missing and behaves,
+               f"settings present (missing={missing}); changing f_ref moves AFI "
+               f"({afi_lo:.0f} vs {afi_hi:.0f}) and afi_building moves the band ({band_lo} vs {band_hi})")
+
+
+def StatusEvaluator_band(cfg, afi):
+    """Minimal port of StatusEvaluator's AFI-band branch (no sensors/decoupling) to
+    prove a band cutoff setting changes the emitted band."""
+    if afi >= cfg.afi_building:
+        return "DRIFTING"
+    if afi >= cfg.afi_fresh:
+        return "BUILDING"
+    return "FRESH"
 
 
 def _c_defaults_match_code():
@@ -532,6 +659,7 @@ def _c_defaults_match_code():
         "kappaI": cfg.kappa_i, "kappaD": cfg.kappa_d, "afiFresh": cfg.afi_fresh,
         "afiBuilding": cfg.afi_building, "decoupRef": cfg.decoup_ref,
         "kjAnchor": cfg.kj_anchor, "trimpFemaleCoeff": cfg.trimp_female_coeff,
+        "gP": cfg.g_p, "a0": cfg.a0, "a1": cfg.a1,   # guard the gP + sigmoid fixes
     }
     mism = []
     for k, v in pairs.items():
@@ -595,8 +723,12 @@ def _c_r2_gate():
     rng = np.random.default_rng(0)
     noisy = [0.8 + rng.normal(0, 0.4) for _ in powers]          # no relationship
     bad = M.fit_sigmoid(powers, noisy)
+    # On rejection the app must NOT adopt the fit (accepted=False), so it falls
+    # back to decoupling-only / α1 display-only rather than a misfit population
+    # sigmoid. Assert the accept flag gates that path.
     return _ok(good["accepted"] and not bad["accepted"],
-               f"clean fit accepted (r2={good['r2']:.2f}); noise rejected (r2={bad['r2']:.2f})")
+               f"clean fit accepted (r2={good['r2']:.2f}); noise rejected "
+               f"(r2={bad['r2']:.2f}) -> decoupling-only/α1-display-only fallback")
 
 
 def _c_threshold_regression():
@@ -643,29 +775,40 @@ CATALOG: List[Check] = [
           "white-paper §8.4; harness §1 Kalman sanity", _c_kalman_sanity),
     Check("H11", "HARD", "Ledger CTL/ATL idempotent per day; survives re-fold",
           "white-paper §5, §8.3", _c_ledger_idempotent),
-    # §2 plausibility
-    Check("P1", "PLAUSIBILITY", "Ensemble-mean α1 decreases as intensity rises",
-          "Rogers/Gronwald; references.md DFA-α1=0.75/0.5", _c_alpha1_vs_intensity),
-    Check("P2", "PLAUSIBILITY", "Decoupling generally increases under sustained drift",
-          "Friel/TrainingPeaks; Barsumyan low-SNR caveat", _c_decoupling_under_drift),
+    Check("H12", "HARD", "CTL/ATL EWMA states non-negative for non-negative TSS",
+          "white-paper §5; harness §1 bounds", _c_ewma_nonneg),
+    # STRUCTURAL — deterministic required invariants (build-breaking, NOT soft)
+    Check("S1", "STRUCTURAL", "Default power→α1 sigmoid crosses the 0.75 AeT anchor at P_AeT",
+          "white-paper §4.2/§4.4; references.md α1=0.75", _c_sigmoid_crosses_075),
+    Check("S2", "STRUCTURAL", "Charge graded (sub-CP allowed, larger above AeT, 0 on coast)",
+          "white-paper §4.2 Rev 2 (no hard CP gate)", _c_subcp_drift_graded),
+    Check("S3", "STRUCTURAL", "α1 below A1_target moves F (the fusion is wired)",
+          "white-paper §4.2 Rev 2 coupling −c_F·F", _c_coupling_wired),
+    Check("S4", "STRUCTURAL", "F observability = non-degenerate Gramian (model only)",
+          "white-paper §4.3a (numerical, not physiological)", _c_observability),
+    Check("S5", "STRUCTURAL", "Respiration/artifact does NOT manufacture fatigue",
+          "white-paper §4.4 R_A1 inflation", _c_respiration_no_fatigue),
+    Check("S6", "STRUCTURAL", "Long steady Z2 → moderate AFI, not severe",
+          "white-paper §4.4 charge↔F_ref tuning", _c_longz2_moderate),
+    Check("S7", "STRUCTURAL", "Recovery/coast relaxes F (κ_d gated, τ_rec decay)",
+          "white-paper §4.4", _c_recovery_relaxes_f),
+    Check("S8", "STRUCTURAL", "W′ match counted only on <thresh→recovery cycle",
+          "white-paper §8.2; Skiba", _c_match_detection),
+    Check("S9", "STRUCTURAL", "Covariance/uncertainty widens under a predict-only gap",
+          "white-paper §8.4 Rev-3 §3e", _c_covariance_widens_predict_only),
+    # §2 plausibility (uncertain, ensemble-level; WARN-only)
+    Check("P1", "PLAUSIBILITY", "Ensemble-mean α1 decreases as intensity rises (CIRCULAR — wiring only)",
+          "Rogers/Gronwald; NB signals.py bakes in the relation → regression protection, not corroboration",
+          _c_alpha1_vs_intensity),
+    Check("P2", "PLAUSIBILITY", "Decoupling increases under sustained drift (CIRCULAR — wiring only)",
+          "Friel/TrainingPeaks; NB drift is imposed by the generator → regression protection, not corroboration",
+          _c_decoupling_under_drift),
+    Check("P3", "PLAUSIBILITY", "Ensemble-mean within-ride α1 drifts downward",
+          "white-paper §3.3; Rogers within-ride (ensemble-mean, soft)", _c_alpha1_withinride_drift),
     Check("P4", "PLAUSIBILITY", "Durability drift near ~1500 kJ is in the ~6-10% ballpark",
           "Maunder/Stevens −6..−10% after ~1400-1680 kJ", _c_durability_magnitude),
-    Check("P5", "PLAUSIBILITY", "Charge graded (sub-CP allowed, larger above AeT, 0 on coast)",
-          "white-paper §4.2 Rev 2 (no hard CP gate)", _c_subcp_drift_graded),
-    Check("P6", "PLAUSIBILITY", "α1 below A1_target moves F (the fusion is wired)",
-          "white-paper §4.2 Rev 2 coupling −c_F·F", _c_coupling_wired),
-    Check("P7", "PLAUSIBILITY", "F observability = non-degenerate Gramian (model only)",
-          "white-paper §4.3a (numerical, not physiological)", _c_observability),
-    Check("P8", "PLAUSIBILITY", "Respiration/artifact does NOT manufacture fatigue",
-          "white-paper §4.4 R_A1 inflation", _c_respiration_no_fatigue),
-    Check("P9", "PLAUSIBILITY", "Long steady Z2 → moderate AFI, not severe",
-          "white-paper §4.4 charge↔F_ref tuning", _c_longz2_moderate),
-    Check("P10", "PLAUSIBILITY", "Recovery/coast relaxes F (κ_d gated, τ_rec decay)",
-          "white-paper §4.4", _c_recovery_relaxes_f),
     Check("P11", "PLAUSIBILITY", "Feat dominates hard efforts; Attrition dominates grinds",
           "white-paper §8.2 (evidence, not a gate)", _c_feat_vs_attrition),
-    Check("P11b", "PLAUSIBILITY", "W′ match counted only on <thresh→recovery cycle",
-          "white-paper §8.2; Skiba", _c_match_detection),
     Check("P12", "HONESTY", "Status/advisory copy is descriptive mood (no imperative)",
           "white-paper §6, §8.1 (check MOOD)", _c_no_imperative),
     Check("P13", "HARD", "Numeric AFI gated pre-pilot (categorical default)",
