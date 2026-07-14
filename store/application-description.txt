@@ -1,0 +1,115 @@
+FatigueMeter - Connect IQ Store description (PLAIN TEXT - paste as-is)
+
+The Connect IQ store does not render Markdown. Everything below the line is
+plain text and can be pasted straight into the store "Description" field.
+
+SHORT SUBTITLE (one line):
+Durability and fatigue on one glance screen - power, heart rate and HRV.
+
+------------------------------------------------------------------------------
+
+FatigueMeter turns your ride into one clear "keep going or ease off" read.
+
+It is a full-screen data field that estimates how fatigue is building during a
+ride, using three signals you already carry: mechanical power, heart rate, and
+beat-to-beat RR intervals (HRV). No lab and no gas-exchange gear.
+
+You flip to it a few times per ride when you want a decision - not another
+number to stare at. It leads with a plain-language status:
+
+  FRESH / PRODUCTIVE            You are riding within your aerobic means.
+  FATIGUE BUILDING              Drift is accumulating; still productive work.
+  DURABILITY MARKERS DRIFTING   The markers say the remaining work is now
+                                mostly fatigue.
+
+And because going deep into the red is often the whole point, it tells you WHY
+you are there:
+
+  Feat of Strength   The fatigue is being bought with real output - a big climb,
+                     a breakaway, matches burned.
+  Attrition          The fatigue is drift, with output fading. The hole-digging
+                     kind.
+
+
+WHAT IS ON THE SCREEN
+
+  - A fatigue dial (AFI) with a green / amber / red band and a NOW marker.
+  - An evidence row: DECOUP (aerobic decoupling), DFA-a1 (with a data-quality
+    dot), kJ/ANCHOR (work done against your personal durability anchor), and
+    MATCHES (W' depletions burned).
+  - A feats strip: your best 1, 5 and 20 minute power for the ride.
+  - A data-quality footer: RR artifact level, and whether DFA-a1 is live or the
+    app has fallen back to decoupling-only.
+
+
+IT LOGS EVERYTHING FOR LATER
+
+Every marker is written into the FIT file as developer fields, so it flows to
+Garmin Connect and third-party analysis tools. A per-ride session summary is
+also kept on the device, so you can compare "was today a feat-of-strength day
+or an attrition day?" across rides.
+
+Note: FatigueMeter deliberately does NOT try to keep a chronic training-load
+figure (CTL / ATL / form) on the watch. A data field only sees the rides it is
+attached to, so it cannot do that honestly. It computes the load for THIS ride
+and exports it; long-term load belongs in your training platform.
+
+
+IT DEGRADES GRACEFULLY
+
+Lose a sensor mid-ride and nothing else breaks. Drop the power meter and it
+falls back to heart-rate based load. Drop the chest strap and it runs a
+decoupling-only estimate. Any missing input greys out only the tiles that need
+it. The screen never blanks and never crashes.
+
+
+HONEST BY DESIGN
+
+This is the part most fatigue apps skip. FatigueMeter separates what is
+validated from what is inferred.
+
+The validated backbone is standard, well-supported sports science: aerobic
+decoupling, durability drift, and the population DFA-a1 = 0.75 aerobic
+threshold anchor.
+
+The fused fatigue index (AFI) and the durability advisory are an ESTIMATE, not
+a measurement. There is no fatigue "ground truth" available on a bicycle, so
+the index is calibrated to your own consistency, every screen carries a
+persistent "advisory - not a validated measurement" tag, and the app never
+issues a command - only a description.
+
+
+TUNING IT
+
+FatigueMeter is designed to be tuned to you. Nearly every threshold, band and
+filter constant is exposed as a setting rather than hard-coded, and the
+defaults are population values that will not fit everyone.
+
+For a full guide to what each setting does, which ones actually matter, how to
+calibrate the DFA-a1 threshold and the durability anchor to yourself, and the
+evidence behind every number, see the project on GitHub:
+
+  https://github.com/Macrophage87/FatigueMeter
+
+Please read that before changing the advanced filter settings.
+
+
+WHAT YOU NEED
+
+  - A power meter - for decoupling, kJ, W' balance and matches.
+  - Heart rate - for the fatigue index and heart-rate load.
+  - An RR-capable chest strap (Polar H10 class) - for DFA-a1 and HRV. Wrist
+    optical heart rate is NOT accurate enough for DFA-a1; without a strap the
+    app runs its decoupling-only fallback.
+
+Add FatigueMeter to a full-screen data page, then set your FTP, critical power,
+W', HR max/rest and sex in the app settings.
+
+
+IMPORTANT
+
+FatigueMeter is a training-analysis tool, not a medical device. It does not
+diagnose overtraining syndrome or any medical condition. Its within-ride
+fatigue estimate is not clinically validated, and the outdoor within-ride use
+of DFA-a1 in particular is an area of active research. Use it as one input
+alongside your own judgment and your coach.
