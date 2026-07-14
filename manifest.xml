@@ -1,9 +1,16 @@
 <?xml version="1.0"?>
 <!--
   FatigueMeter — Connect IQ data field manifest.
-  App type: datafield (on-ride single glance screen). Persistent CTL/ATL/TSB and
-  Session Results are carried between rides via Toybox.Application.Storage (white
-  paper §8.3), so no separate widget is required for the residual ledger.
+  App type: datafield (on-ride single glance screen).
+
+  Persistence (Toybox.Application.Storage): per-ride Session Results and the
+  per-athlete calibration fit are carried between rides (white paper §8.3), so no
+  separate widget is required.
+
+  NOTE: the field does NOT maintain a cross-ride CTL/ATL/TSB residual ledger —
+  it cannot do so honestly on-device, since it only sees the rides it is attached
+  to. It computes per-ride load (TSS / TRIMP) and exports it via FIT developer
+  fields; chronic accumulation belongs to the training-load platform.
 
   Target: Edge 1050 (primary) plus other power-capable Edge / Forerunner devices.
   Add device ids here as you test them; every listed product must expose a colour
