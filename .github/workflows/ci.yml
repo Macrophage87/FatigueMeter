@@ -1,0 +1,120 @@
+# =============================================================================
+# Lightweight, runner-free CI.
+# -----------------------------------------------------------------------------
+# All jobs run on stock GitHub-hosted `ubuntu-latest`: NO self-hosted runner and
+# NO Garmin SDK download/config is required. The lint jobs need no Connect IQ SDK
+# at all; the compile+unit-test gate (`test`) gets the SDK by running the pre-built
+# matco/connectiq-tester Docker IMAGE as the job `container` (SDK 9.2.0, edge1050)
+# and is currently ADVISORY (`continue-on-error`) until a real GitHub run proves
+# it green.
+# =============================================================================
+name: CI
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - 'store/**'          # built store deliverable, not source
+      - 'LICENSE'
+  # NOTE: no paths-ignore on the PR trigger. A required check must post a status
+  # on EVERY PR; a store/**-only or LICENSE-only PR that skipped the workflow
+  # would leave `ci-required` pending forever under "require branches up to
+  # date" and block merge. So the workflow always runs on PRs.
+  pull_request: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read            # least privilege; nothing here writes to the repo
+
+# Every `uses:` action is SHA-pinned with its claimed tag in a trailing comment.
+
+jobs:
+  # ------------------------------------------------------------- manifest lint
+  # Gate-gap fix (review pt.5): the (deferred) compile+test path does NOT catch
+  # the historical placeholder-app-id / store-rejection class, because a bad id
+  # still compiles and still passes tests. This tiny runner-free check does.
+  manifest-lint:
+    name: Manifest app-id lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+      - run: ./scripts/check_manifest_appid.sh
+
+  # ------------------------------------------------- compile + unit-test gate
+  # SDK-backed compile + "Run No Evil" (:test) unit-test gate. We run the pre-built
+  # matco/connectiq-tester Docker IMAGE as the job `container` (rather than the
+  # matco/action-connectiq-tester wrapper action) so it runs on a stock
+  # GitHub-hosted runner with NO self-hosted runner and NO Garmin SDK
+  # download/config, while letting us adjust the compile flags in-container.
+  #
+  # WHY NOT THE ACTION: the action (and the image's own ENTRYPOINT `tester.sh`)
+  # hardcode `monkeyc ... -t -l 3` (type-check level 3 = STRICT). This codebase is
+  # intentionally UNTYPED Monkey C, so Strict mode emits hundreds of "... is
+  # untyped" / "Cannot determine type" errors and aborts. The level is NOT exposed
+  # as an action input/env, so we run the image directly and `sed` the level down
+  # to 1 (Gradual) — which matches how the project actually builds (BUILD.md uses
+  # no `-l`). We still reuse the image's proven `tester.sh` harness (compile +
+  # xvfb + monkeydo + PASSED/FAILED parsing).
+  #
+  # ADVISORY for now (`continue-on-error: true`, and NOT in `ci-required`'s
+  # `needs`): a broken/mismatched image must not block merges until a real
+  # GitHub run confirms the image builds `edge1050` and the tests pass. Promote
+  # to REQUIRED (add `test` to `ci-required.needs`) only after a green run.
+  test:
+    name: Compile + unit tests (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    continue-on-error: true
+    container:
+      # Pinned by immutable digest for supply-chain safety. This digest is the
+      # `v2.8.0` == `latest` build of ghcr.io/matco/connectiq-tester (Connect IQ
+      # SDK 9.2.0, which includes edge1050 device defs). The digest IS the pin;
+      # the tag in this comment is informational. Bump deliberately when adopting
+      # a newer SDK.
+      image: ghcr.io/matco/connectiq-tester@sha256:7a6f586cb0e0393ff288da09cf27b6dad40a0058a346c529b99fd0fc19858f0f   # v2.8.0 = SDK 9.2.0, edge1050
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+      - name: Lower hardcoded type-check level (untyped codebase; strict -l 3 is incompatible)
+        run: |
+          set -eux
+          # The image's ENTRYPOINT tester.sh hardcodes 'monkeyc ... -t -l 3'; this
+          # repo is untyped Monkey C. Rewrite the level to 1 (Gradual), matching
+          # how the project actually builds (BUILD.md uses no -l). The regex is
+          # whitespace-robust in case spacing changes (e.g. '-l3').
+          test -f /connectiq/bin/tester.sh
+          sed -i -E 's/-l[[:space:]]*3/-l 1/g' /connectiq/bin/tester.sh
+          grep -n 'monkeyc' /connectiq/bin/tester.sh || true
+      - name: Run Connect IQ unit tests (edge1050)
+        # tester.sh positional args are ($1=DEVICE_ID, $2=CERTIFICATE_PATH); it
+        # compiles monkey.jungle in the CWD (the checked-out workspace) and
+        # generates a throwaway certificate when none is given. So we pass only
+        # the device and run from the repo root.
+        run: bash /connectiq/bin/tester.sh edge1050
+
+  # --------------------------------------------------------- traceability lint
+  traceability:
+    name: Constants <-> traceability (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true          # advisory until the matcher is hardened;
+                                     # promote to a required check (add it to
+                                     # `ci-required` needs) once it no longer
+                                     # produces false positives.
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+      - run: python3 scripts/check_traceability.py
+
+  # -------------------------------------------------- required-check aggregator
+  # Single stable status-check name to require in branch protection. Only the
+  # non-advisory jobs are in `needs`; `traceability` is advisory and stays out
+  # of the required set.
+  ci-required:
+    name: ci-required
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [ manifest-lint ]
+    steps:
+      - run: echo "manifest lint passed"
