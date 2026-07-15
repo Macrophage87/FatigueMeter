@@ -61,6 +61,44 @@ The **separate** model-consistency harness (Python) specified in
 across synthetic and real rides; it is regression protection, **not** external
 validity (there is no on-bike fatigue ground truth).
 
+## CI
+
+`.github/workflows/ci.yml` runs on every push to `main` and on every pull
+request. It is split into a **required** gate and **advisory** jobs:
+
+- **`compile`** — a matrix that builds the `--unit-test` binary (`-w`,
+  warnings-as-errors) for **every** device id in `manifest.xml`
+  (`edge1050`, `edge1040`, `edge840`, `edge540`, `edgeexplore2`, `fr965`,
+  `fr955`, `fenix7x`). This is deterministic and catches the crash-class
+  regressions this project has shipped (e.g. an illegal-API-for-datafield
+  call) as well as test-compilation breakage.
+- **`manifest-lint`** — `scripts/check_manifest_appid.sh`, a packaging check
+  for the placeholder / store-reject app-id class the compile+test path
+  cannot see.
+- **`ci-required`** — the aggregator job that `needs` both of the above.
+  **This is the single required status check** to require in branch
+  protection, so adding/removing a matrix device does not churn the
+  protected-check list.
+- **`simulate`** (advisory, `continue-on-error`) — runs the 23 `(:test)`
+  functions headlessly in the Qt simulator under `xvfb` and parses the output
+  strictly (`scripts/run_ciq_tests.sh` + `scripts/check_ciq_tests.py`). Kept
+  off the merge gate until the sim path is proven stable.
+- **`traceability`** (advisory, `continue-on-error`) —
+  `scripts/check_traceability.py` enforces "no physiological constant without
+  a `docs/traceability.md` row."
+
+The required check to enable in branch protection is **`ci-required`** (with
+"require branches to be up to date before merging"). Enabling it is a manual
+repo-admin step. The jobs use **no secrets** — the signing key is generated
+fresh in-job and never committed — so fork PR runs are safe; preserve that
+invariant.
+
+> Note: the SDK-install path (`scripts/install_ciq_sdk.sh`) and the headless
+> simulator are the fragile parts. The primary path for device definitions and
+> the sim is a self-hosted / pre-baked runner with the SDK + `edge1050` + Qt
+> already installed; the hosted-runner install requires resolving and pinning
+> the exact Garmin SDK/device URLs first.
+
 ## Sideload to an Edge 1050
 
 1. Build `bin/FatigueMeter.prg` as above.
