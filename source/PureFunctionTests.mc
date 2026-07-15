@@ -430,12 +430,20 @@ module PureFunctionTests {
 
     (:test)
     function testScalarUpdateNonFiniteSGuard(logger) {
+        // Feed R = NaN (NOT +Inf). With +Inf the guard is vacuous: every gain
+        // PHt[i]/S = finite/Inf = +0, so x/P stay finite even with the guard
+        // removed. NaN is what actually exercises the !isFinite(S) branch: S =
+        // R + H·PHt = NaN, and WITHOUT the guard the gains PHt[i]/NaN = NaN would
+        // poison x (x[i] + NaN·innov = NaN). The result is finite here ONLY
+        // because the guard skips the channel and returns [x, P] unchanged -> so
+        // this assertion FAILS on pre-fix code and passes on the fixed code.
         var inf = 1.0e30 * 1.0e30;
+        var nan = inf - inf;
         var x = [0.0, 100.0, 0.75, 0.0];
         var P = KalmanMath.zeros4x4();
         P[1][1] = 25.0;
         var H = [0.0, 1.0, 0.0, 0.0];
-        var r = KalmanMath.scalarUpdate(x, P, H, 120.0, inf);   // R non-finite -> S non-finite -> skip
+        var r = KalmanMath.scalarUpdate(x, P, H, 120.0, nan);   // R NaN -> S NaN -> skip
         return KalmanMath.isFiniteVector(r[0]) && KalmanMath.isFiniteMatrix(r[1]);
     }
 
@@ -497,5 +505,30 @@ module PureFunctionTests {
         return finite && tracks
             && !injected.isDegraded()               // prevention: never latched
             && !control.isDegraded();
+    }
+
+    (:test)
+    function testFilterResetBranchScrubsNonFiniteState(logger) {
+        // POSITIVE coverage for the self-heal RESET branch (§8.4). The prevention
+        // test above only drives the isFinite(power) gate; the degraded=true +
+        // x[S_HR]/x[S_HRSS] scrub branch is otherwise unreachable through the
+        // public API (finite-input dynamics + clamps keep x finite). We use the
+        // (:test)-only debugInjectNonFiniteState seam to poke a genuine NaN into
+        // the HR state, then a single step() must trip the finite check, latch
+        // isDegraded(), and scrub the poisoned component back to its safe seed.
+        var inf = 1.0e30 * 1.0e30;
+        var nan = inf - inf;
+        var cfg = new Config();
+        var filt = new AcuteFatigueFilter(cfg);
+        // index 1 == S_HR (a NEVER-clamped state, the exact gap the branch guards)
+        filt.debugInjectNonFiniteState(1, nan);
+        filt.step(cfg.pAeT + 80.0, 160.0, null, 100.0, 0.0, true, true);
+        // safe seed for HR states is cfg.hrRest + 20.0 (matches initState fallback)
+        return filt.isDegraded()
+            && MathUtil.isFinite(filt.latentHr())
+            && near(filt.latentHr(), cfg.hrRest + 20.0, 1e-6)
+            && MathUtil.isFinite(filt.fState())
+            && MathUtil.isFinite(filt.afiKalman())
+            && MathUtil.isFinite(filt.latentA1());
     }
 }

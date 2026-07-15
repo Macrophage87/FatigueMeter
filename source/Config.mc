@@ -110,6 +110,16 @@ class Config {
         // setting that becomes a denominator or a decay/gain term is clamped to a
         // finite, sane range here so no user misconfiguration can push Infinity,
         // NaN, a negative decay factor, or a zero denominator into the filter math.
+        //
+        // TEST-COVERAGE SEAM (acknowledged gap, PR #36 review pt 3): the clamp
+        // helpers (clampTau/clampPositive/clampGate/validatedHr) are unit-tested
+        // directly in PureFunctionTests, but their WIRING into this reload() block
+        // is not — deleting a clamp CALL from a line below would leave every test
+        // green. Kept as-is (the minimal faithful option) rather than adding a
+        // parallel static `sanitize()` seam purely to be test-observable; the
+        // assignments below are the single source of truth and must each route
+        // their raw property through the matching helper. Reviewers changing a
+        // line here own re-checking that the clamp call is preserved.
         ftp      = clampPositive(num("ftp", 250).toFloat(), 1.0);
         cp       = clampPositive(num("cp", 240).toFloat(), 1.0);
         wPrime   = clampPositive(num("wPrime", 20000).toFloat(), 1.0);
