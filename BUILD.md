@@ -64,65 +64,41 @@ validity (there is no on-bike fatigue ground truth).
 ## CI
 
 `.github/workflows/ci.yml` runs on every push to `main` and on every pull
-request. It is split into a **required** gate and **advisory** jobs:
+request. It is deliberately **lightweight**: both real jobs run on stock
+`ubuntu-latest` and need **no Connect IQ SDK and no self-hosted runner**.
 
-- **`compile`** — a matrix that builds the `--unit-test` binary (`-w`,
-  warnings-as-errors) for **every** device id in `manifest.xml`
-  (`edge1050`, `edge1040`, `edge840`, `edge540`, `edgeexplore2`, `fr965`,
-  `fr955`, `fenix7x`). This is deterministic and catches the crash-class
-  regressions this project has shipped (e.g. an illegal-API-for-datafield
-  call) as well as test-compilation breakage. **Runs on
-  `[self-hosted, connectiq]`** — unattended Garmin SDK download on a hosted
-  runner is infeasible (EULA + manifest-gated, unpredictable zip URLs), so a
-  pre-baked self-hosted runner (SDK + `edge1050` + Qt) is the only primary path.
 - **`manifest-lint`** — `scripts/check_manifest_appid.sh`, a packaging check
-  for the placeholder / store-reject app-id class the compile+test path
-  cannot see.
-- **`ci-required`** — the aggregator job that `needs` both of the above.
-  **This is the single required status check** to require in branch
-  protection, so adding/removing a matrix device does not churn the
-  protected-check list.
-- **`simulate`** (advisory, `continue-on-error`) — runs the 23 `(:test)`
-  functions headlessly in the Qt simulator under `xvfb` and parses the output
-  strictly (`scripts/run_ciq_tests.sh` + `scripts/check_ciq_tests.py`). Also on
-  `[self-hosted, connectiq]`. Kept off the merge gate until the sim path is
-  proven stable.
+  that guards the historical placeholder / store-reject app-id class (a bad
+  32-hex id, an all-zero or all-same-character id). A compile+test path cannot
+  see this — a bad id still compiles and still passes tests — which is exactly
+  why this cheap runner-free check exists.
 - **`traceability`** (advisory, `continue-on-error`) —
-  `scripts/check_traceability.py` enforces "no physiological constant without
-  a `docs/traceability.md` row."
+  `scripts/check_traceability.py` enforces "no physiological constant in
+  `source/Constants.mc` without a `docs/traceability.md` row." It is advisory
+  until the matcher is hardened; it can be promoted into the required set later
+  (add it to `ci-required`'s `needs`) once it no longer produces false
+  positives.
+- **`ci-required`** — the aggregator job that `needs: [manifest-lint]`. **This
+  is the single stable required status check** to require in branch protection
+  (with "require branches to be up to date before merging"). `traceability` is
+  advisory and stays out of the required set. Enabling the branch-protection
+  rule is a manual repo-admin step.
 
-The required check to enable in branch protection is **`ci-required`** (with
-"require branches to be up to date before merging"). Enabling it is a manual
-repo-admin step.
+The workflow uses no secrets and every `uses:` action is SHA-pinned, so fork-PR
+runs are safe. The PR trigger has **no `paths-ignore`** (the workflow always
+runs on PRs) so a `store/**`- or `LICENSE`-only PR still posts a `ci-required`
+status instead of sitting pending forever under "require branches up to date".
 
-**Standing up the `connectiq` self-hosted runner** that `compile`/`simulate`
-require is documented in
-[`ci/self-hosted-runner/README.md`](ci/self-hosted-runner/README.md) — a Docker
-+ Compose kit plus a bare-VM alternative, with the operator runbook (obtain the
-SDK/device URLs from the Connect IQ SDK Manager, get a registration token, build
-+ run, verify online, compile-break dry-run, then enable branch protection). The jobs use **no secrets** — the signing key is generated
-fresh in-job and never committed — so fork PR runs are safe. The `compile` and
-`simulate` jobs additionally carry a **fork guard**
-(`github.event.pull_request.head.repo.fork == false`) so untrusted fork-PR code
-never executes on the persistent self-hosted runner; preserve that invariant.
+### Deferred: compile/unit-test gate
 
-> **BLUNT STATUS — read before enabling branch protection.** `compile` and
-> `simulate` run on `[self-hosted, connectiq]`. Until such a runner is
-> **registered and online**, those jobs stay queued/pending and therefore
-> **`ci-required` never goes green**. **Do NOT enable branch protection on
-> `ci-required`** until (1) a `connectiq`-labelled runner (SDK + `edge1050` +
-> Qt pre-baked) is online, and (2) at least one fully-green `ci-required` run
-> has been observed. Enabling it before then blocks every merge on a check that
-> cannot post a status.
->
-> Still owed before protection (cannot be verified without network to
-> Garmin/GitHub): that `CIQ_SDK_VERSION` (7.4.3) ships `edge1050`; that each
-> pinned action SHA matches its claimed tag; and a **compile-break dry-run**
-> proving a `monkeyc` error reddens the *required* check.
->
-> The PR trigger has **no `paths-ignore`** (the workflow always runs on PRs) so
-> a `store/**`- or `LICENSE`-only PR still posts a `ci-required` status instead
-> of sitting pending forever under "require branches up to date".
+A device-matrix **compile** gate (and a headless **simulator** unit-test run)
+is intentionally **omitted** from this workflow. Both need the Garmin Connect IQ
+SDK, and unattended SDK download on a GitHub-hosted runner is infeasible (EULA +
+manifest-gated, unpredictable zip URLs). They would therefore require a
+**self-hosted `connectiq` runner** with the SDK, the target device definitions,
+and Qt pre-baked. That gate can be added later once such a runner is stood up;
+until then the SDK-dependent checks are run locally (see "Build" and
+"Unit tests" above).
 
 ## Sideload to an Edge 1050
 

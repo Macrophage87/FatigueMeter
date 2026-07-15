@@ -1,21 +1,11 @@
 # =============================================================================
-# BLUNT STATUS NOTE — READ BEFORE ENABLING BRANCH PROTECTION
+# Lightweight, runner-free CI.
 # -----------------------------------------------------------------------------
-# The SDK-dependent jobs (`compile`, `simulate`) run on a SELF-HOSTED runner
-# labelled `connectiq` with the Connect IQ SDK + `edge1050` device + Qt already
-# pre-baked. Until such a runner is registered and online, those jobs stay
-# QUEUED/PENDING and `ci-required` therefore NEVER goes green. Unattended
-# Garmin SDK download on a hosted runner is infeasible (EULA + unpredictable,
-# manifest-gated zip URLs), so self-hosted is the ONLY primary path.
-#
-#   >>> DO NOT enable branch protection on `ci-required` until:
-#         (1) a `[self-hosted, connectiq]` runner is registered AND online, and
-#         (2) at least one fully-green `ci-required` run has been OBSERVED.
-#       Enabling it before then blocks every merge on a check that can't post.
-#
-# Pre-protection verification still owed (cannot be done here — no network to
-# Garmin/GitHub): CIQ_SDK_VERSION ships `edge1050`; every pinned action SHA
-# matches its claimed tag; the compile-break dry-run reddens `ci-required`.
+# This workflow intentionally contains ONLY the checks that need NO Connect IQ
+# SDK and NO self-hosted runner: they run on stock `ubuntu-latest`. The
+# SDK-dependent compile/unit-test gate is DEFERRED (see BUILD.md "Deferred:
+# compile/unit-test gate") — it needs a self-hosted `connectiq` runner with the
+# Garmin SDK and can be added later.
 # =============================================================================
 name: CI
 on:
@@ -37,96 +27,13 @@ concurrency:
 permissions:
   contents: read            # least privilege; nothing here writes to the repo
 
-env:
-  # Pinned deliberately. minSdkVersion=4.1.0 is only the APP floor; the BUILD
-  # SDK must be a current 7.x that ships the edge1050 device definition
-  # (edge1050 is a recent device). Bump this consciously and re-verify it
-  # builds edge1050 before merging the bump.
-  # PRE-PROTECTION CHECK (unverified here — no network to Garmin): confirm that
-  # SDK 7.4.3 actually ships the `edge1050` device definition before requiring
-  # this workflow. Carried over from the initial scaffold, NOT yet verified.
-  CIQ_SDK_VERSION: "7.4.3"
-
-# PRE-PROTECTION CHECK (unverified here — no network to GitHub): every action is
-# SHA-pinned below with its claimed tag in a trailing comment. Confirm each SHA
-# actually resolves to that tag (SHA<->tag match) before enabling protection.
+# Every `uses:` action is SHA-pinned with its claimed tag in a trailing comment.
 
 jobs:
-  # ------------------------------------------------------------------ compile
-  compile:
-    name: Compile --unit-test
-    # SDK-dependent -> self-hosted runner with SDK + devices + Qt pre-baked.
-    runs-on: [ self-hosted, connectiq ]
-    # FORK GUARD: this is a PERSISTENT runner. Never execute untrusted fork-PR
-    # code on it. Push events (fork==false is null/false for push) and same-repo
-    # PRs run; PRs from forks are skipped. Preserves the no-secrets / fork-safe
-    # invariant now that the job is no longer on a disposable hosted runner.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        device:
-          - edge1050    # primary
-          - edge1040
-          - edge840
-          - edge540
-          - edgeexplore2
-          - fr965
-          - fr955
-          - fenix7x
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
-      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00   # v4.7.1
-        with:
-          distribution: temurin
-          java-version: '17'         # CIQ tooling is JVM-based
-
-      - name: Restore Connect IQ SDK + devices
-        id: sdk-cache
-        uses: actions/cache@d4323d4df104b026a6aa633fdb11d772146be0bf       # v4.2.2
-        with:
-          # Devices live in ~/.Garmin/ConnectIQ/Devices and ship SEPARATELY
-          # from the SDK zip — cache both, keyed on the pinned version.
-          path: |
-            ~/.ciq-sdk
-            ~/.Garmin/ConnectIQ/Devices
-          key: ciq-${{ env.CIQ_SDK_VERSION }}-${{ runner.os }}
-
-      - name: Install Connect IQ SDK (${{ env.CIQ_SDK_VERSION }})
-        if: steps.sdk-cache.outputs.cache-hit != 'true'
-        run: ./scripts/install_ciq_sdk.sh            # <-- the fragile step; see notes
-
-      - name: Add SDK to PATH
-        run: echo "$HOME/.ciq-sdk/bin" >> "$GITHUB_PATH"
-
-      - name: Generate throwaway developer key
-        run: |
-          openssl genrsa -out developer_key.pem 4096
-          openssl pkcs8 -topk8 -inform PEM -outform DER \
-            -in developer_key.pem -out developer_key.der -nocrypt
-          # lives only in the runner workspace; .gitignore blocks *.der/*.pem/developer_key.*
-
-      - name: Compile (${{ matrix.device }})
-        run: |
-          mkdir -p bin
-          monkeyc -f monkey.jungle \
-            -o "bin/FatigueMeter-test-${{ matrix.device }}.prg" \
-            -y developer_key.der -d "${{ matrix.device }}" \
-            --unit-test -w          # -w: warnings->errors so test-compile breakage fails
-
-      - name: Stash edge1050 test PRG for the sim job
-        if: matrix.device == 'edge1050'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
-        with:
-          name: test-prg-edge1050
-          path: bin/FatigueMeter-test-edge1050.prg
-          retention-days: 3
-
   # ------------------------------------------------------------- manifest lint
-  # Gate-gap fix (review pt.5): the compile+test path does NOT catch the
-  # historical placeholder-app-id / store-rejection class, because a bad id
-  # still compiles and still passes tests. This tiny check does.
+  # Gate-gap fix (review pt.5): the (deferred) compile+test path does NOT catch
+  # the historical placeholder-app-id / store-rejection class, because a bad id
+  # still compiles and still passes tests. This tiny runner-free check does.
   manifest-lint:
     name: Manifest app-id lint
     runs-on: ubuntu-latest
@@ -135,63 +42,27 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
       - run: ./scripts/check_manifest_appid.sh
 
-  # -------------------------------------------------- required-check aggregator
-  # Single stable status-check name to require in branch protection, so adding/
-  # removing a matrix device does not churn the protected-check list.
-  ci-required:
-    name: ci-required
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs: [ compile, manifest-lint ]
-    steps:
-      - run: echo "compile matrix + manifest lint passed"
-
-  # -------------------------------------------------------- headless simulator
-  simulate:
-    name: Headless sim (advisory)
-    needs: compile
-    # SDK+Qt-dependent -> same pre-baked self-hosted runner as compile.
-    runs-on: [ self-hosted, connectiq ]
-    # FORK GUARD (same rationale as compile): never run untrusted fork-PR code
-    # on the persistent runner.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
-    timeout-minutes: 15
-    continue-on-error: true          # advisory until the sim path is proven stable
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
-      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00   # v4.7.1
-        with: { distribution: temurin, java-version: '17' }
-      - uses: actions/cache@d4323d4df104b026a6aa633fdb11d772146be0bf       # v4.2.2
-        with:
-          path: |
-            ~/.ciq-sdk
-            ~/.Garmin/ConnectIQ/Devices
-          key: ciq-${{ env.CIQ_SDK_VERSION }}-${{ runner.os }}
-      - name: Add SDK to PATH
-        run: echo "$HOME/.ciq-sdk/bin" >> "$GITHUB_PATH"
-      - name: Install Qt/X deps for the simulator
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb libxkbcommon-x11-0 libxcb-xinerama0 \
-            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
-            libgl1 libnss3 libasound2t64 || true
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
-        with:
-          name: test-prg-edge1050
-          path: bin
-      - name: Run tests headlessly
-        run: ./scripts/run_ciq_tests.sh bin/FatigueMeter-test-edge1050.prg edge1050
-      - name: Upload sim log
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
-        with: { name: sim-run-log, path: sim-run.log }
-
   # --------------------------------------------------------- traceability lint
   traceability:
     name: Constants <-> traceability (advisory)
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    continue-on-error: true          # advisory until the matcher is hardened
+    continue-on-error: true          # advisory until the matcher is hardened;
+                                     # promote to a required check (add it to
+                                     # `ci-required` needs) once it no longer
+                                     # produces false positives.
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
       - run: python3 scripts/check_traceability.py
+
+  # -------------------------------------------------- required-check aggregator
+  # Single stable status-check name to require in branch protection. Only the
+  # non-advisory jobs are in `needs`; `traceability` is advisory and stays out
+  # of the required set.
+  ci-required:
+    name: ci-required
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [ manifest-lint ]
+    steps:
+      - run: echo "manifest lint passed"
