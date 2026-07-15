@@ -93,7 +93,14 @@ request. It is split into a **required** gate and **advisory** jobs:
 
 The required check to enable in branch protection is **`ci-required`** (with
 "require branches to be up to date before merging"). Enabling it is a manual
-repo-admin step. The jobs use **no secrets** — the signing key is generated
+repo-admin step.
+
+**Standing up the `connectiq` self-hosted runner** that `compile`/`simulate`
+require is documented in
+[`ci/self-hosted-runner/README.md`](ci/self-hosted-runner/README.md) — a Docker
++ Compose kit plus a bare-VM alternative, with the operator runbook (obtain the
+SDK/device URLs from the Connect IQ SDK Manager, get a registration token, build
++ run, verify online, compile-break dry-run, then enable branch protection). The jobs use **no secrets** — the signing key is generated
 fresh in-job and never committed — so fork PR runs are safe. The `compile` and
 `simulate` jobs additionally carry a **fork guard**
 (`github.event.pull_request.head.repo.fork == false`) so untrusted fork-PR code

@@ -1,0 +1,59 @@
+# =============================================================================
+# docker-compose.yml — the `connectiq` self-hosted runner for FatigueMeter CI.
+# -----------------------------------------------------------------------------
+# Build once (SDK + edge1050 devices + Qt baked in), then bring the runner up.
+# See ci/self-hosted-runner/README.md for the full runbook.
+#
+#   Build:  CIQ_SDK_URL=... CIQ_DEVICES_URL=... CIQ_EULA_ACCEPT=1 \
+#           docker compose build
+#   Run:    GITHUB_REPO_URL=... RUNNER_TOKEN=... docker compose up -d
+#
+# The build args (SDK/device URLs, EULA) are operator-supplied and read from the
+# environment below. There are NO fake defaults: an unset URL fails the build.
+# =============================================================================
+services:
+  runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # --- operator-supplied, no defaults (empty => build fails on purpose) --
+        # Resolve these from the Connect IQ SDK Manager (see README.md).
+        CIQ_SDK_URL: ${CIQ_SDK_URL:?set CIQ_SDK_URL to the pinned Linux SDK zip URL}
+        CIQ_DEVICES_URL: ${CIQ_DEVICES_URL:?set CIQ_DEVICES_URL to the edge1050 device-bundle URL}
+        # Setting this to 1 accepts Garmin's Connect IQ SDK licence on your behalf.
+        CIQ_EULA_ACCEPT: ${CIQ_EULA_ACCEPT:?set CIQ_EULA_ACCEPT=1 to accept Garmin's SDK EULA}
+        # Pinned; keep in lockstep with ci.yml's CIQ_SDK_VERSION.
+        CIQ_SDK_VERSION: ${CIQ_SDK_VERSION:-7.4.3}
+        # PLACEHOLDER — verify latest at https://github.com/actions/runner/releases
+        RUNNER_VERSION: ${RUNNER_VERSION:-2.328.0}
+        # Optional: tarball SHA-256 from that release page (empty => checksum skipped).
+        RUNNER_TARBALL_SHA256: ${RUNNER_TARBALL_SHA256:-}
+    environment:
+      # --- runtime registration inputs (operator-supplied) -------------------
+      GITHUB_REPO_URL: ${GITHUB_REPO_URL:?set GITHUB_REPO_URL, e.g. https://github.com/Macrophage87/FatigueMeter}
+      # Short-lived registration token (~1h). Re-issue and re-`up` when it expires.
+      RUNNER_TOKEN: ${RUNNER_TOKEN:?set RUNNER_TOKEN (Settings -> Actions -> Runners -> New self-hosted runner)}
+      RUNNER_NAME: ${RUNNER_NAME:-connectiq-fatiguemeter}
+      # `connectiq` is always applied; this appends extra labels if you want them.
+      RUNNER_LABELS: ${RUNNER_LABELS:-}
+      # 1 = ephemeral (de-registers after one job; paired with restart below to
+      # get a fresh runner per job). 0 = long-lived.
+      RUNNER_EPHEMERAL: ${RUNNER_EPHEMERAL:-1}
+    # With RUNNER_EPHEMERAL=1 the runner exits after each job; this restart
+    # policy immediately brings up a replacement, so you always have exactly one
+    # clean runner listening. NOTE: on restart the runner re-registers with the
+    # SAME RUNNER_TOKEN from the environment — once that registration token
+    # expires (~1h), replace it: `RUNNER_TOKEN=<new> docker compose up -d`.
+    restart: unless-stopped
+    # -------------------------------------------------------------------------
+    # SCALING / REPLACING:
+    #   * More parallel runners (the compile matrix has 8 devices, so several
+    #     runners drain the queue faster):
+    #       docker compose up -d --scale runner=3
+    #     (remove `container_name` if you set one; scaling needs unique names.)
+    #   * Force a fresh image + runner after an SDK or runner-version bump:
+    #       docker compose build --pull && docker compose up -d --force-recreate
+    #   * Tear down (each runner de-registers itself via entrypoint.sh's trap):
+    #       docker compose down
+    # -------------------------------------------------------------------------
