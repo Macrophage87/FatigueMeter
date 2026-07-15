@@ -64,14 +64,27 @@ validity (there is no on-bike fatigue ground truth).
 ## CI
 
 `.github/workflows/ci.yml` runs on every push to `main` and on every pull
-request. It is deliberately **lightweight**: both real jobs run on stock
-`ubuntu-latest` and need **no Connect IQ SDK and no self-hosted runner**.
+request. It is deliberately **lightweight**: every job runs on stock
+GitHub-hosted `ubuntu-latest` and needs **no self-hosted runner**. The lint
+jobs need no Connect IQ SDK at all; the compile/unit-test gate gets the SDK from
+a pre-built Docker image (see `test` below).
 
 - **`manifest-lint`** — `scripts/check_manifest_appid.sh`, a packaging check
   that guards the historical placeholder / store-reject app-id class (a bad
   32-hex id, an all-zero or all-same-character id). A compile+test path cannot
   see this — a bad id still compiles and still passes tests — which is exactly
   why this cheap runner-free check exists.
+- **`test`** (advisory, `continue-on-error`) — the **compile + unit-test gate**.
+  It uses the `matco/action-connectiq-tester` Docker action, which ships the
+  Connect IQ SDK (`9.2.0`, incl. `edge1050`) and the "Run No Evil" `(:test)`
+  framework baked into a container image, so it runs the compile + off-device
+  unit tests on a stock GitHub-hosted runner with **no SDK download and no
+  self-hosted runner**. It targets `device: edge1050` (falling back to the
+  action's default `fenix7` if that device is not in the image). The action is
+  SHA-pinned to `master@60fd2e8` (= SDK 9.2.0) for supply-chain safety. It is
+  **advisory** for now so a broken/mismatched image cannot block merges; once a
+  real GitHub run confirms the image builds `edge1050` and the tests pass,
+  promote it to required by adding `test` to `ci-required`'s `needs`.
 - **`traceability`** (advisory, `continue-on-error`) —
   `scripts/check_traceability.py` enforces "no physiological constant in
   `source/Constants.mc` without a `docs/traceability.md` row." It is advisory
@@ -89,15 +102,22 @@ runs are safe. The PR trigger has **no `paths-ignore`** (the workflow always
 runs on PRs) so a `store/**`- or `LICENSE`-only PR still posts a `ci-required`
 status instead of sitting pending forever under "require branches up to date".
 
-### Deferred: compile/unit-test gate
+### Compile/unit-test gate
 
-A device-matrix **compile** gate (and a headless **simulator** unit-test run)
-is intentionally **omitted** from this workflow. Both need the Garmin Connect IQ
-SDK, and unattended SDK download on a GitHub-hosted runner is infeasible (EULA +
-manifest-gated, unpredictable zip URLs). They would therefore require a
-**self-hosted `connectiq` runner** with the SDK, the target device definitions,
-and Qt pre-baked. That gate can be added later once such a runner is stood up;
-until then the SDK-dependent checks are run locally (see "Build" and
+The compile + unit-test gate is provided by the **`test`** job above via the
+`matco/action-connectiq-tester` Docker action. Previously this gate was deferred
+because unattended Garmin SDK download on a GitHub-hosted runner is infeasible
+(EULA + manifest-gated, unpredictable zip URLs) and a self-hosted `connectiq`
+runner was the only obvious option. The Docker action sidesteps that: the SDK
+(`9.2.0`, incl. `edge1050`) and the "Run No Evil" `(:test)` framework are baked
+into a container image, so the gate runs on stock `ubuntu-latest` with no SDK
+download and no self-hosted runner.
+
+The job is **advisory** (`continue-on-error: true`, and not in `ci-required`'s
+`needs`) until a real GitHub run confirms the image builds `edge1050` and the
+tests pass — so a broken or mismatched image cannot block merges. Once a green
+run is observed, **promote it to required** by adding `test` to `ci-required`'s
+`needs`. The SDK-dependent checks can still be run locally (see "Build" and
 "Unit tests" above).
 
 ## Sideload to an Edge 1050
