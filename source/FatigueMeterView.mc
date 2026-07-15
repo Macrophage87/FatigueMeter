@@ -20,6 +20,7 @@ class FatigueMeterView extends WatchUi.DataField {
     hidden var ledger;
     hidden var fit;
     hidden var sessions;
+    hidden var ant;            // ANT+ HRM RR reader (null if Ant unavailable)
 
     hidden var pendingRr;      // RR intervals (ms) received since last compute
     hidden var tick;           // ride seconds
@@ -97,17 +98,18 @@ class FatigueMeterView extends WatchUi.DataField {
     }
 
     hidden function registerSensors() {
-        // NOTE (crash fix): Sensor.registerSensorDataListener — the only API that
-        // exposes beat-to-beat RR intervals — is NOT available to a Data Field
-        // (it is a Watch-App / Widget API). Calling it raises an UNCATCHABLE
-        // "Permission Required / symbol not available to Data Field" crash in
-        // initialize(), which is why the field previously showed only the Connect
-        // IQ banner and wrote nothing to the FIT. In the data-field form factor we
-        // therefore cannot read RR, so DFA-α1 is unavailable and the app runs in
-        // its designed decoupling-only mode (white paper §8.4). RR/α1 requires a
-        // Watch-App build; onSensorData is retained for that variant.
-        //
-        // (Intentionally a no-op here — do not call registerSensorDataListener.)
+        // A Data Field cannot use Sensor.registerSensorDataListener (Watch-App /
+        // Widget only — calling it is an uncatchable crash). To get beat-to-beat
+        // RR for DFA-α1 we open a raw ANT+ channel to the HR strap instead — the
+        // same approach the alphaHRV field uses. Guarded: if Ant is unavailable
+        // or the device/strap can't provide it, `ant` stays null and the app runs
+        // decoupling-only (§8.4) with no crash.
+        try {
+            ant = new AntHrm();
+            ant.start();
+        } catch (e) {
+            ant = null;
+        }
     }
 
     //! Beat-to-beat RR callback. Buffers intervals for the next compute(); guarded
@@ -149,8 +151,9 @@ class FatigueMeterView extends WatchUi.DataField {
         var hr = (info != null) ? sanitize(info.currentHeartRate) : null;
         var cadence = (info != null) ? sanitize(info.currentCadence) : null;
 
-        var rr = pendingRr;
-        pendingRr = [];
+        // RR intervals come from the ANT+ HRM channel (data fields can't use the
+        // Sensor RR listener). Drain whatever arrived since the last second.
+        var rr = (ant != null) ? ant.drainRr() : [];
 
         // "active" = actually doing work (pedaling / producing power). Basing this
         // on pedaling rather than HR>rest is what lets F RELAX on coasting/stops

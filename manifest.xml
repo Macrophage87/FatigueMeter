@@ -40,8 +40,12 @@
         </iq:products>
 
         <iq:permissions>
+            <!-- Ant: open a raw ANT+ channel to the HR strap to read beat-to-beat
+                 RR intervals for DFA-α1. A data field cannot use the Sensor RR
+                 listener, so (like the alphaHRV field) it reads the ANT+ HRM
+                 broadcast directly. Requires an ANT+ strap (Polar H10 class). -->
+            <iq:uses-permission id="Ant"/>
             <iq:uses-permission id="Sensor"/>
-            <iq:uses-permission id="SensorHistory"/>
             <iq:uses-permission id="FitContributor"/>
         </iq:permissions>
 

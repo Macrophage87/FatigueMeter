@@ -98,9 +98,11 @@ WHAT YOU NEED
 
   - A power meter - for decoupling, kJ, W' balance and matches.
   - Heart rate - for the fatigue index and heart-rate load.
-  - An RR-capable chest strap (Polar H10 class) - for DFA-a1 and HRV. Wrist
-    optical heart rate is NOT accurate enough for DFA-a1; without a strap the
-    app runs its decoupling-only fallback.
+  - An ANT+ RR-capable chest strap (Polar H10 class) - for DFA-a1 and HRV.
+    FatigueMeter reads beat-to-beat RR directly from the ANT+ strap broadcast,
+    so the strap must support ANT+ (a BLE-only strap will not work, and wrist
+    optical heart rate is not accurate enough for DFA-a1). Without a usable RR
+    source the app runs its decoupling-only fallback.
 
 Add FatigueMeter to a full-screen data page, then set your FTP, critical power,
 W', HR max/rest and sex in the app settings.
