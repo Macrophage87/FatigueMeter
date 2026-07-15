@@ -81,7 +81,9 @@ class TrainingLoadLedger {
     function update(power, hr) {
         secondsAccum++;
         if (power != null && power >= 0) {
-            var p2 = power * power;
+            // #7: same int^4 overflow as PrimitivesCalculator.normalizedPower.
+            var pf = power.toFloat();
+            var p2 = pf * pf;
             npSumPow4 += p2 * p2;
             npCount++;
         }
