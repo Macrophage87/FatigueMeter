@@ -97,14 +97,17 @@ class FatigueMeterView extends WatchUi.DataField {
     }
 
     hidden function registerSensors() {
-        try {
-            Sensor.registerSensorDataListener(method(:onSensorData), {
-                :period => 1,
-                :heartBeatIntervals => { :enabled => true }
-            });
-        } catch (e) {
-            // RR listener unavailable -> app runs in decoupling-only fallback
-        }
+        // NOTE (crash fix): Sensor.registerSensorDataListener — the only API that
+        // exposes beat-to-beat RR intervals — is NOT available to a Data Field
+        // (it is a Watch-App / Widget API). Calling it raises an UNCATCHABLE
+        // "Permission Required / symbol not available to Data Field" crash in
+        // initialize(), which is why the field previously showed only the Connect
+        // IQ banner and wrote nothing to the FIT. In the data-field form factor we
+        // therefore cannot read RR, so DFA-α1 is unavailable and the app runs in
+        // its designed decoupling-only mode (white paper §8.4). RR/α1 requires a
+        // Watch-App build; onSensorData is retained for that variant.
+        //
+        // (Intentionally a no-op here — do not call registerSensorDataListener.)
     }
 
     //! Beat-to-beat RR callback. Buffers intervals for the next compute(); guarded
@@ -130,6 +133,16 @@ class FatigueMeterView extends WatchUi.DataField {
     // =====================================================================
 
     function compute(info) {
+        // Top-level guard (§8.4): compute() must never throw — an uncaught error
+        // here blanks the field to the Connect IQ banner and stops all logging.
+        try {
+            computeInner(info);
+        } catch (e) {
+            // swallow: keep the field alive; the last good snapshot stays on screen
+        }
+    }
+
+    hidden function computeInner(info) {
         tick++;
 
         var power = (info != null) ? sanitize(info.currentPower) : null;
@@ -288,18 +301,23 @@ class FatigueMeterView extends WatchUi.DataField {
     // =====================================================================
 
     function onUpdate(dc) {
-        var w = dc.getWidth();
-        var h = dc.getHeight();
-        dc.setColor(Graphics.COLOR_WHITE, 0x111111);
-        dc.clear();
+        // Top-level guard (§8.4): a render error must never crash the field.
+        try {
+            var w = dc.getWidth();
+            var h = dc.getHeight();
+            dc.setColor(Graphics.COLOR_WHITE, 0x111111);
+            dc.clear();
 
-        // Evidence row is given AT LEAST equal height to the status band (§8.1 —
-        // the primitives are the validated part), 0.26·h each.
-        drawStatusBand(dc, w, h, 0, (h * 0.26).toNumber());
-        drawDial(dc, w, h, (h * 0.26).toNumber(), (h * 0.18).toNumber());
-        drawEvidenceRow(dc, w, h, (h * 0.44).toNumber(), (h * 0.26).toNumber());
-        drawFeatsStrip(dc, w, h, (h * 0.70).toNumber(), (h * 0.13).toNumber());
-        drawFooter(dc, w, h, (h * 0.83).toNumber(), (h * 0.17).toNumber());
+            // Evidence row is given AT LEAST equal height to the status band (§8.1 —
+            // the primitives are the validated part), 0.26·h each.
+            drawStatusBand(dc, w, h, 0, (h * 0.26).toNumber());
+            drawDial(dc, w, h, (h * 0.26).toNumber(), (h * 0.18).toNumber());
+            drawEvidenceRow(dc, w, h, (h * 0.44).toNumber(), (h * 0.26).toNumber());
+            drawFeatsStrip(dc, w, h, (h * 0.70).toNumber(), (h * 0.13).toNumber());
+            drawFooter(dc, w, h, (h * 0.83).toNumber(), (h * 0.17).toNumber());
+        } catch (e) {
+            // last resort: leave whatever was drawn rather than crash to the banner
+        }
     }
 
     hidden function statusColor(status) {
