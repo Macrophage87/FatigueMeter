@@ -2,6 +2,18 @@ using Toybox.Lang;
 using Toybox.Application;
 using Toybox.Application.Properties;
 
+// ---- Input-sanitisation floors (issue #6) ---------------------------------
+// Declared at MODULE scope (not inside class Config) so the STATIC clamp
+// helpers below can reference them: a class-level `const` is only reachable
+// from instance context, so neither a bare nor a `Config.`-qualified reference
+// resolves from a static method. Module-scope symbols resolve bare from static
+// methods. These are input-sanitisation floors, NOT physiological constants, so
+// they live here (not Constants.mc) and need no §9 traceability row.
+const VALID_MAX = 1.0e12;    // finite ceiling, far above any physical setting,
+                             // safely below MathUtil.clamp's 1e30 Inf threshold
+const MIN_HR_SPREAD = 20.0;  // TRIMP span & hrSs need a real HRmax-HRrest gap
+const HR_REST_FLOOR = 20.0;  // physiological minimum resting HR (bpm)
+
 //! Live settings snapshot, read from Application.Properties with white-paper
 //! defaults as fallback. Loaded once at start and refreshed on onSettingsChanged.
 //!
@@ -38,31 +50,27 @@ class Config {
     // decay/gain term. PUBLIC + STATIC so PureFunctionTests can drive them with
     // hostile inputs (a `hidden` member is unreachable from the test module).
     // MathUtil.clamp scrubs NaN and -Inf to the floor and +Inf/huge to VALID_MAX,
-    // so routing through it also neutralises non-finite property values. These
-    // are input-sanitisation floors, NOT physiological constants, so they live
-    // here (not Constants.mc) and need no §9 traceability row.
-    const VALID_MAX = 1.0e12;    // finite ceiling, far above any physical setting,
-                                 // safely below MathUtil.clamp's 1e30 Inf threshold
-    const MIN_HR_SPREAD = 20.0;  // TRIMP span & hrSs need a real HRmax-HRrest gap
-    const HR_REST_FLOOR = 20.0;  // physiological minimum resting HR (bpm)
+    // so routing through it also neutralises non-finite property values. The
+    // sanitisation floors themselves (VALID_MAX / MIN_HR_SPREAD / HR_REST_FLOOR)
+    // are declared at module scope above so these static helpers can reach them.
 
     //! Decay time-constant (s): floor at 1.0 so dt = 1/tau in (0,1], keeping the
     //! Kalman decay factor 1-dt in [0,1). Prevents tau=0 (dt=Inf -> NaN matrix)
     //! and 0<tau<1 (negative decay -> divergence).
     static function clampTau(raw) {
-        return MathUtil.clamp(raw, 1.0, Config.VALID_MAX);
+        return MathUtil.clamp(raw, 1.0, VALID_MAX);
     }
 
     //! Strictly-positive denominator / gain with a physical floor.
     static function clampPositive(raw, floor) {
-        return MathUtil.clamp(raw, floor, Config.VALID_MAX);
+        return MathUtil.clamp(raw, floor, VALID_MAX);
     }
 
     //! Artifact gate: must sit strictly above ARTIFACT_GOOD (=1.0) so the
     //! RR-quality span (gate - good) in rrWeight() is positive and the
     //! artifactPct/gate scale in effectiveRA1() is well-defined.
     static function clampGate(raw) {
-        return MathUtil.clamp(raw, Constants.ARTIFACT_GOOD + 0.5, Config.VALID_MAX);
+        return MathUtil.clamp(raw, Constants.ARTIFACT_GOOD + 0.5, VALID_MAX);
     }
 
     //! Validate the HR pair. Returns [rest, max]. If either input is non-finite,
@@ -72,7 +80,7 @@ class Config {
     //! not a silent swap.
     static function validatedHr(rawRest, rawMax) {
         if (!MathUtil.isFinite(rawRest) || !MathUtil.isFinite(rawMax)
-            || rawRest < Config.HR_REST_FLOOR || (rawMax - rawRest) < Config.MIN_HR_SPREAD) {
+            || rawRest < HR_REST_FLOOR || (rawMax - rawRest) < MIN_HR_SPREAD) {
             return [50.0, 190.0];
         }
         return [rawRest, rawMax];
