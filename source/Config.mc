@@ -50,19 +50,19 @@ class Config {
     //! Kalman decay factor 1-dt in [0,1). Prevents tau=0 (dt=Inf -> NaN matrix)
     //! and 0<tau<1 (negative decay -> divergence).
     static function clampTau(raw) {
-        return MathUtil.clamp(raw, 1.0, VALID_MAX);
+        return MathUtil.clamp(raw, 1.0, Config.VALID_MAX);
     }
 
     //! Strictly-positive denominator / gain with a physical floor.
     static function clampPositive(raw, floor) {
-        return MathUtil.clamp(raw, floor, VALID_MAX);
+        return MathUtil.clamp(raw, floor, Config.VALID_MAX);
     }
 
     //! Artifact gate: must sit strictly above ARTIFACT_GOOD (=1.0) so the
     //! RR-quality span (gate - good) in rrWeight() is positive and the
     //! artifactPct/gate scale in effectiveRA1() is well-defined.
     static function clampGate(raw) {
-        return MathUtil.clamp(raw, Constants.ARTIFACT_GOOD + 0.5, VALID_MAX);
+        return MathUtil.clamp(raw, Constants.ARTIFACT_GOOD + 0.5, Config.VALID_MAX);
     }
 
     //! Validate the HR pair. Returns [rest, max]. If either input is non-finite,
@@ -72,7 +72,7 @@ class Config {
     //! not a silent swap.
     static function validatedHr(rawRest, rawMax) {
         if (!MathUtil.isFinite(rawRest) || !MathUtil.isFinite(rawMax)
-            || rawRest < HR_REST_FLOOR || (rawMax - rawRest) < MIN_HR_SPREAD) {
+            || rawRest < Config.HR_REST_FLOOR || (rawMax - rawRest) < Config.MIN_HR_SPREAD) {
             return [50.0, 190.0];
         }
         return [rawRest, rawMax];
