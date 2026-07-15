@@ -71,7 +71,10 @@ request. It is split into a **required** gate and **advisory** jobs:
   (`edge1050`, `edge1040`, `edge840`, `edge540`, `edgeexplore2`, `fr965`,
   `fr955`, `fenix7x`). This is deterministic and catches the crash-class
   regressions this project has shipped (e.g. an illegal-API-for-datafield
-  call) as well as test-compilation breakage.
+  call) as well as test-compilation breakage. **Runs on
+  `[self-hosted, connectiq]`** — unattended Garmin SDK download on a hosted
+  runner is infeasible (EULA + manifest-gated, unpredictable zip URLs), so a
+  pre-baked self-hosted runner (SDK + `edge1050` + Qt) is the only primary path.
 - **`manifest-lint`** — `scripts/check_manifest_appid.sh`, a packaging check
   for the placeholder / store-reject app-id class the compile+test path
   cannot see.
@@ -81,8 +84,9 @@ request. It is split into a **required** gate and **advisory** jobs:
   protected-check list.
 - **`simulate`** (advisory, `continue-on-error`) — runs the 23 `(:test)`
   functions headlessly in the Qt simulator under `xvfb` and parses the output
-  strictly (`scripts/run_ciq_tests.sh` + `scripts/check_ciq_tests.py`). Kept
-  off the merge gate until the sim path is proven stable.
+  strictly (`scripts/run_ciq_tests.sh` + `scripts/check_ciq_tests.py`). Also on
+  `[self-hosted, connectiq]`. Kept off the merge gate until the sim path is
+  proven stable.
 - **`traceability`** (advisory, `continue-on-error`) —
   `scripts/check_traceability.py` enforces "no physiological constant without
   a `docs/traceability.md` row."
@@ -90,14 +94,28 @@ request. It is split into a **required** gate and **advisory** jobs:
 The required check to enable in branch protection is **`ci-required`** (with
 "require branches to be up to date before merging"). Enabling it is a manual
 repo-admin step. The jobs use **no secrets** — the signing key is generated
-fresh in-job and never committed — so fork PR runs are safe; preserve that
-invariant.
+fresh in-job and never committed — so fork PR runs are safe. The `compile` and
+`simulate` jobs additionally carry a **fork guard**
+(`github.event.pull_request.head.repo.fork == false`) so untrusted fork-PR code
+never executes on the persistent self-hosted runner; preserve that invariant.
 
-> Note: the SDK-install path (`scripts/install_ciq_sdk.sh`) and the headless
-> simulator are the fragile parts. The primary path for device definitions and
-> the sim is a self-hosted / pre-baked runner with the SDK + `edge1050` + Qt
-> already installed; the hosted-runner install requires resolving and pinning
-> the exact Garmin SDK/device URLs first.
+> **BLUNT STATUS — read before enabling branch protection.** `compile` and
+> `simulate` run on `[self-hosted, connectiq]`. Until such a runner is
+> **registered and online**, those jobs stay queued/pending and therefore
+> **`ci-required` never goes green**. **Do NOT enable branch protection on
+> `ci-required`** until (1) a `connectiq`-labelled runner (SDK + `edge1050` +
+> Qt pre-baked) is online, and (2) at least one fully-green `ci-required` run
+> has been observed. Enabling it before then blocks every merge on a check that
+> cannot post a status.
+>
+> Still owed before protection (cannot be verified without network to
+> Garmin/GitHub): that `CIQ_SDK_VERSION` (7.4.3) ships `edge1050`; that each
+> pinned action SHA matches its claimed tag; and a **compile-break dry-run**
+> proving a `monkeyc` error reddens the *required* check.
+>
+> The PR trigger has **no `paths-ignore`** (the workflow always runs on PRs) so
+> a `store/**`- or `LICENSE`-only PR still posts a `ci-required` status instead
+> of sitting pending forever under "require branches up to date".
 
 ## Sideload to an Edge 1050
 

@@ -8,10 +8,14 @@ log = pathlib.Path(sys.argv[1]).read_text(errors="replace")
 src = pathlib.Path("source/PureFunctionTests.mc").read_text()
 
 expected = len(re.findall(r"\(:test\)", src))          # self-updating count
-ran_m    = re.search(r"RAN\s+(\d+)\s+tests", log)       # e.g. "PASSED (RAN 23 tests)"
+# Case-insensitive: real dumps say "Ran 23 tests" / "RAN 23 Tests" etc. The
+# exact casing/format of the Connect IQ runner summary still needs validating
+# against ONE real runner dump (unavailable here).
+ran_m    = re.search(r"RAN\s+(\d+)\s+TESTS?", log, re.IGNORECASE)  # "PASSED (Ran 23 tests)"
 ran      = int(ran_m.group(1)) if ran_m else 0
-passed   = re.search(r"\bPASSED\b", log) is not None
-bad      = [l for l in log.splitlines() if re.search(r"\b(FAILED|ERROR)\b", l)]
+passed   = re.search(r"\bPASSED\b", log, re.IGNORECASE) is not None
+bad      = [l for l in log.splitlines()
+            if re.search(r"\b(FAILED|ERROR)\b", l, re.IGNORECASE)]
 
 ok = passed and not bad and expected > 0 and ran == expected
 print(f"expected={expected} ran={ran} passed={passed} failing_lines={len(bad)}")

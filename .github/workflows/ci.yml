@@ -1,3 +1,22 @@
+# =============================================================================
+# BLUNT STATUS NOTE — READ BEFORE ENABLING BRANCH PROTECTION
+# -----------------------------------------------------------------------------
+# The SDK-dependent jobs (`compile`, `simulate`) run on a SELF-HOSTED runner
+# labelled `connectiq` with the Connect IQ SDK + `edge1050` device + Qt already
+# pre-baked. Until such a runner is registered and online, those jobs stay
+# QUEUED/PENDING and `ci-required` therefore NEVER goes green. Unattended
+# Garmin SDK download on a hosted runner is infeasible (EULA + unpredictable,
+# manifest-gated zip URLs), so self-hosted is the ONLY primary path.
+#
+#   >>> DO NOT enable branch protection on `ci-required` until:
+#         (1) a `[self-hosted, connectiq]` runner is registered AND online, and
+#         (2) at least one fully-green `ci-required` run has been OBSERVED.
+#       Enabling it before then blocks every merge on a check that can't post.
+#
+# Pre-protection verification still owed (cannot be done here — no network to
+# Garmin/GitHub): CIQ_SDK_VERSION ships `edge1050`; every pinned action SHA
+# matches its claimed tag; the compile-break dry-run reddens `ci-required`.
+# =============================================================================
 name: CI
 on:
   push:
@@ -5,12 +24,11 @@ on:
     paths-ignore:
       - 'store/**'          # built store deliverable, not source
       - 'LICENSE'
-  pull_request:
-    paths-ignore:
-      - 'store/**'
-      - 'LICENSE'
-      # NOTE: docs/** is intentionally NOT ignored so that editing
-      # docs/traceability.md still fires the traceability lint.
+  # NOTE: no paths-ignore on the PR trigger. A required check must post a status
+  # on EVERY PR; a store/**-only or LICENSE-only PR that skipped the workflow
+  # would leave `ci-required` pending forever under "require branches up to
+  # date" and block merge. So the workflow always runs on PRs.
+  pull_request: {}
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -24,13 +42,26 @@ env:
   # SDK must be a current 7.x that ships the edge1050 device definition
   # (edge1050 is a recent device). Bump this consciously and re-verify it
   # builds edge1050 before merging the bump.
+  # PRE-PROTECTION CHECK (unverified here — no network to Garmin): confirm that
+  # SDK 7.4.3 actually ships the `edge1050` device definition before requiring
+  # this workflow. Carried over from the initial scaffold, NOT yet verified.
   CIQ_SDK_VERSION: "7.4.3"
+
+# PRE-PROTECTION CHECK (unverified here — no network to GitHub): every action is
+# SHA-pinned below with its claimed tag in a trailing comment. Confirm each SHA
+# actually resolves to that tag (SHA<->tag match) before enabling protection.
 
 jobs:
   # ------------------------------------------------------------------ compile
   compile:
     name: Compile --unit-test
-    runs-on: ubuntu-latest
+    # SDK-dependent -> self-hosted runner with SDK + devices + Qt pre-baked.
+    runs-on: [ self-hosted, connectiq ]
+    # FORK GUARD: this is a PERSISTENT runner. Never execute untrusted fork-PR
+    # code on it. Push events (fork==false is null/false for push) and same-repo
+    # PRs run; PRs from forks are skipped. Preserves the no-secrets / fork-safe
+    # invariant now that the job is no longer on a disposable hosted runner.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -110,6 +141,7 @@ jobs:
   ci-required:
     name: ci-required
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: [ compile, manifest-lint ]
     steps:
       - run: echo "compile matrix + manifest lint passed"
@@ -118,10 +150,11 @@ jobs:
   simulate:
     name: Headless sim (advisory)
     needs: compile
-    # PRIMARY PATH is a pre-baked runner with SDK+edge1050+Qt already installed:
-    #   runs-on: [ self-hosted, connectiq ]
-    # Hosted fallback shown here; keep the steps identical either way.
-    runs-on: ubuntu-latest
+    # SDK+Qt-dependent -> same pre-baked self-hosted runner as compile.
+    runs-on: [ self-hosted, connectiq ]
+    # FORK GUARD (same rationale as compile): never run untrusted fork-PR code
+    # on the persistent runner.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     timeout-minutes: 15
     continue-on-error: true          # advisory until the sim path is proven stable
     steps:
