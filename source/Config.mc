@@ -33,6 +33,51 @@ class Config {
         reload();
     }
 
+    // ---- Input sanitisation (issue #6) -------------------------------------
+    // Single-point guards for every setting that becomes a denominator or a
+    // decay/gain term. PUBLIC + STATIC so PureFunctionTests can drive them with
+    // hostile inputs (a `hidden` member is unreachable from the test module).
+    // MathUtil.clamp scrubs NaN and -Inf to the floor and +Inf/huge to VALID_MAX,
+    // so routing through it also neutralises non-finite property values. These
+    // are input-sanitisation floors, NOT physiological constants, so they live
+    // here (not Constants.mc) and need no §9 traceability row.
+    const VALID_MAX = 1.0e12;    // finite ceiling, far above any physical setting,
+                                 // safely below MathUtil.clamp's 1e30 Inf threshold
+    const MIN_HR_SPREAD = 20.0;  // TRIMP span & hrSs need a real HRmax-HRrest gap
+    const HR_REST_FLOOR = 20.0;  // physiological minimum resting HR (bpm)
+
+    //! Decay time-constant (s): floor at 1.0 so dt = 1/tau in (0,1], keeping the
+    //! Kalman decay factor 1-dt in [0,1). Prevents tau=0 (dt=Inf -> NaN matrix)
+    //! and 0<tau<1 (negative decay -> divergence).
+    static function clampTau(raw) {
+        return MathUtil.clamp(raw, 1.0, VALID_MAX);
+    }
+
+    //! Strictly-positive denominator / gain with a physical floor.
+    static function clampPositive(raw, floor) {
+        return MathUtil.clamp(raw, floor, VALID_MAX);
+    }
+
+    //! Artifact gate: must sit strictly above ARTIFACT_GOOD (=1.0) so the
+    //! RR-quality span (gate - good) in rrWeight() is positive and the
+    //! artifactPct/gate scale in effectiveRA1() is well-defined.
+    static function clampGate(raw) {
+        return MathUtil.clamp(raw, Constants.ARTIFACT_GOOD + 0.5, VALID_MAX);
+    }
+
+    //! Validate the HR pair. Returns [rest, max]. If either input is non-finite,
+    //! rest is sub-physiological, or the span is too small (including a swapped
+    //! rest>=max pair), reset BOTH to the documented defaults. A swapped/degenerate
+    //! pair is still a misconfiguration, so the honest fallback is the default,
+    //! not a silent swap.
+    static function validatedHr(rawRest, rawMax) {
+        if (!MathUtil.isFinite(rawRest) || !MathUtil.isFinite(rawMax)
+            || rawRest < HR_REST_FLOOR || (rawMax - rawRest) < MIN_HR_SPREAD) {
+            return [50.0, 190.0];
+        }
+        return [rawRest, rawMax];
+    }
+
     hidden function num(key, dflt) {
         var v = null;
         try {
@@ -61,20 +106,35 @@ class Config {
     }
 
     function reload() {
-        ftp      = num("ftp", 250).toFloat();
-        cp       = num("cp", 240).toFloat();
-        wPrime   = num("wPrime", 20000).toFloat();
-        hrMax    = num("hrMax", 190).toFloat();
-        hrRest   = num("hrRest", 50).toFloat();
+        // Mandatory single-point input-sanitisation guard (issue #6): every
+        // setting that becomes a denominator or a decay/gain term is clamped to a
+        // finite, sane range here so no user misconfiguration can push Infinity,
+        // NaN, a negative decay factor, or a zero denominator into the filter math.
+        //
+        // TEST-COVERAGE SEAM (acknowledged gap, PR #36 review pt 3): the clamp
+        // helpers (clampTau/clampPositive/clampGate/validatedHr) are unit-tested
+        // directly in PureFunctionTests, but their WIRING into this reload() block
+        // is not — deleting a clamp CALL from a line below would leave every test
+        // green. Kept as-is (the minimal faithful option) rather than adding a
+        // parallel static `sanitize()` seam purely to be test-observable; the
+        // assignments below are the single source of truth and must each route
+        // their raw property through the matching helper. Reviewers changing a
+        // line here own re-checking that the clamp call is preserved.
+        ftp      = clampPositive(num("ftp", 250).toFloat(), 1.0);
+        cp       = clampPositive(num("cp", 240).toFloat(), 1.0);
+        wPrime   = clampPositive(num("wPrime", 20000).toFloat(), 1.0);
+        var hr   = validatedHr(num("hrRest", 50).toFloat(), num("hrMax", 190).toFloat());
+        hrRest   = hr[0];
+        hrMax    = hr[1];
         sexFemale = bool("sexFemale", false);
 
-        tauHr    = num("tauHr", Constants.TAU_HR).toFloat();
-        tauA     = num("tauA", Constants.TAU_A).toFloat();
-        tauRec   = num("tauRec", Constants.TAU_REC).toFloat();
+        tauHr    = clampTau(num("tauHr", Constants.TAU_HR).toFloat());
+        tauA     = clampTau(num("tauA", Constants.TAU_A).toFloat());
+        tauRec   = clampTau(num("tauRec", Constants.TAU_REC).toFloat());
         kappaI   = num("kappaI", Constants.KAPPA_I).toFloat();
         kappaD   = num("kappaD", Constants.KAPPA_D).toFloat();
         cF       = num("cF", Constants.C_F).toFloat();
-        fRef     = num("fRef", Constants.F_REF).toFloat();
+        fRef     = clampPositive(num("fRef", Constants.F_REF).toFloat(), 0.1);
         a0       = num("a0", Constants.SIG_A0).toFloat();
         a1       = num("a1", Constants.SIG_A1).toFloat();
         sigmoidS = num("sigmoidS", Constants.SIG_S).toFloat();
@@ -89,15 +149,15 @@ class Config {
         decoupOk      = num("decoupOk", Constants.DECOUP_OK).toFloat();
         decoupCaution = num("decoupCaution", Constants.DECOUP_CAUTION).toFloat();
         decoupHigh    = num("decoupHigh", Constants.DECOUP_HIGH).toFloat();
-        artifactGate  = num("artifactGate", 5.0).toFloat();
+        artifactGate  = clampGate(num("artifactGate", 5.0).toFloat());
         powerCvGate   = num("powerCvGate", 0.10).toFloat();
         coastFracGate = num("coastFracGate", 0.10).toFloat();
-        kjAnchor      = num("kjAnchor", 2000.0).toFloat();
+        kjAnchor      = clampPositive(num("kjAnchor", 2000.0).toFloat(), 1.0);
 
         afiFresh      = num("afiFresh", Constants.AFI_FRESH_MAX).toFloat();
         afiBuilding   = num("afiBuilding", Constants.AFI_BUILDING_MAX).toFloat();
         afiDriftMargin = num("afiDriftMargin", 15.0).toFloat();
-        decoupRef     = num("decoupRef", Constants.DECOUP_REF).toFloat();
+        decoupRef     = clampPositive(num("decoupRef", Constants.DECOUP_REF).toFloat(), 0.1);
 
         featWSev     = num("featWSev", 0.02).toFloat();
         featMatchW   = num("featMatchW", 40.0).toFloat();

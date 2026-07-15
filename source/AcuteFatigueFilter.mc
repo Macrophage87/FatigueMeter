@@ -41,6 +41,7 @@ class AcuteFatigueFilter {
     hidden var afiBaseCount;
     hidden var lastAfi;
     hidden var obs;              // cached observability/conditioning check (§4.3a)
+    hidden var degraded;         // latched true if a non-finite state/cov was reset (§8.4)
 
     function initialize(config) {
         cfg = config;
@@ -56,6 +57,7 @@ class AcuteFatigueFilter {
         lastAfi = 0.0;
         obs = null;
         fbSeen = false;
+        degraded = false;
         x = [0.0, 0.0, Constants.AET_ALPHA1, 0.0];
         P = KalmanMath.zeros4x4();
         lastPower = 0.0;
@@ -75,13 +77,17 @@ class AcuteFatigueFilter {
         var hr0 = (hr != null && hr > 0) ? hr.toFloat() : (cfg.hrRest + 20.0);
         var a10 = (alpha1 != null && alpha1 > 0) ? alpha1 : Constants.AET_ALPHA1;
         x = [ cfg.hrRest + cfg.gP * 0.0, hr0, a10, seedF ];
-        P = KalmanMath.zeros4x4();
-        P[S_HRSS][S_HRSS] = Constants.P0_HR;
-        P[S_HR][S_HR] = Constants.P0_HRLAT;
-        P[S_A1][S_A1] = Constants.P0_A1;
-        P[S_F][S_F] = Constants.P0_F;
+        seedCovarianceP0();
         initialized = true;
         computeObservability();
+    }
+
+    hidden function seedCovarianceP0() {
+        P = KalmanMath.zeros4x4();
+        P[S_HRSS][S_HRSS] = Constants.P0_HR;
+        P[S_HR][S_HR]     = Constants.P0_HRLAT;
+        P[S_A1][S_A1]     = Constants.P0_A1;
+        P[S_F][S_F]       = Constants.P0_F;
     }
 
     //! §4.3a: run the mandatory observability/conditioning check once with the
@@ -185,8 +191,9 @@ class AcuteFatigueFilter {
             initState(hr, a1seed);
         }
 
-        var p = (power != null && power >= 0) ? power.toFloat() : lastKnownPower();
-        if (power != null && power >= 0) { lastPower = power.toFloat(); }
+        var powerOk = (power != null && power >= 0 && MathUtil.isFinite(power));
+        var p = powerOk ? power.toFloat() : lastKnownPower();
+        if (powerOk) { lastPower = power.toFloat(); }
         priorDominated = stationary;   // steady power -> F is prior-dominated (§4.3a)
 
         // ---- build linear transition A and input u for this P ----
@@ -237,6 +244,21 @@ class AcuteFatigueFilter {
         // keep F physically bounded (never negative; cap at wide 3·F_ref)
         x[S_F] = MathUtil.clamp(x[S_F], 0.0, 3.0 * cfg.fRef);
         x[S_A1] = MathUtil.clamp(x[S_A1], 0.1, 1.8);
+
+        // Last line of defense: x[S_HRSS]/x[S_HR] are never clamped, so a
+        // non-finite value that slips past every guard above could still strand
+        // them. If any state/cov went non-finite, reset the covariance to P0,
+        // scrub x to the same safe seeds initState/seedFromLayer3 use, and latch
+        // the event so it is observable rather than silently floored (§8.4).
+        if (!KalmanMath.isFiniteVector(x) || !KalmanMath.isFiniteMatrix(P)) {
+            seedCovarianceP0();
+            var hrSafe = cfg.hrRest + 20.0;
+            if (!MathUtil.isFinite(x[S_HRSS])) { x[S_HRSS] = hrSafe; }
+            if (!MathUtil.isFinite(x[S_HR]))   { x[S_HR]   = hrSafe; }
+            if (!MathUtil.isFinite(x[S_A1]))   { x[S_A1]   = Constants.AET_ALPHA1; }
+            if (!MathUtil.isFinite(x[S_F]))    { x[S_F]    = MathUtil.clamp(seedF, 0.0, cfg.fRef); }
+            degraded = true;
+        }
     }
 
     //! Inflate R_A1 when respiration changes rapidly or artifact is elevated
@@ -325,4 +347,23 @@ class AcuteFatigueFilter {
     function dominantSourceIsRr() { return dominantRr; }
     function didSourceSwitch() { return sourceSwitched; }
     function isInitialized() { return initialized; }
+    function isDegraded() { return degraded; }
+
+    // =====================================================================
+    //  TEST-SUPPORT ONLY  (issue #8 self-heal RESET-branch coverage)
+    // =====================================================================
+    //! The `(:test)` annotation excludes this from release/production builds
+    //! (only compiled under the unit-test target `-t`, like the tests themselves).
+    //! It exists solely to make the self-heal RESET branch in step() reachable:
+    //! with finite inputs the public API keeps x finite by construction (the
+    //! clamps + finite-power gate hold), so the `degraded=true` + x-scrub path
+    //! cannot be driven end-to-end. This seam pokes a non-finite value straight
+    //! into the hidden state x and marks the filter initialized so the next
+    //! step() propagates it, trips the finite check, and self-heals. It performs
+    //! NO filtering itself and must never be called from shipping code.
+    (:test)
+    function debugInjectNonFiniteState(index, value) {
+        initialized = true;
+        x[index] = value;
+    }
 }

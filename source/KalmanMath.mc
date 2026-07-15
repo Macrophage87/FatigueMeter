@@ -63,7 +63,7 @@ module KalmanMath {
         // S = H·PHt + R
         var S = R;
         for (var i = 0; i < 4; i++) { S += H[i] * PHt[i]; }
-        if (S < 1.0e-9) { return [x, P]; }   // degenerate; skip safely
+        if (!MathUtil.isFinite(S) || S < 1.0e-9) { return [x, P]; }   // degenerate/non-finite; skip safely
         // Hx
         var Hx = 0.0;
         for (var i = 0; i < 4; i++) { Hx += H[i] * x[i]; }
@@ -168,10 +168,28 @@ module KalmanMath {
         for (var i = 0; i < 4; i++) {
             for (var j = i + 1; j < 4; j++) {
                 var m = (P[i][j] + P[j][i]) / 2.0;
+                if (!MathUtil.isFinite(m)) { m = 0.0; }   // scrub NaN/Inf off-diagonals
                 P[i][j] = m; P[j][i] = m;
             }
-            if (P[i][i] < 1.0e-6) { P[i][i] = 1.0e-6; }
+            if (!MathUtil.isFinite(P[i][i]) || P[i][i] < 1.0e-6) { P[i][i] = 1.0e-6; }
         }
         return P;
+    }
+
+    //! First-non-finite-wins finiteness scans for the 4-vector / 4x4 used by the filter.
+    function isFiniteVector(v) {
+        for (var i = 0; i < 4; i++) {
+            if (!MathUtil.isFinite(v[i])) { return false; }
+        }
+        return true;
+    }
+
+    function isFiniteMatrix(M) {
+        for (var i = 0; i < 4; i++) {
+            for (var j = 0; j < 4; j++) {
+                if (!MathUtil.isFinite(M[i][j])) { return false; }
+            }
+        }
+        return true;
     }
 }

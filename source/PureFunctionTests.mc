@@ -258,4 +258,277 @@ module PureFunctionTests {
         }
         return rapid.fState() < stable.fState();
     }
+
+    // =====================================================================
+    //  #6 — Config input sanitisation (hostile-input guards)
+    // =====================================================================
+
+    // build a +Inf without a literal division (overflows Float range)
+    function posInf() { var b = 9.0e37; return b * b; }
+
+    (:test)
+    function testClampTauFloorsDegenerate(logger) {
+        // tau=0 (dt=Inf), 0<tau<1 (negative decay), negatives, NaN and +Inf all
+        // clamp to a finite value >= 1.0; a legitimate tau passes through.
+        var inf = posInf();
+        var nan = inf - inf;
+        var zero = Config.clampTau(0.0);
+        var sub1 = Config.clampTau(0.5);
+        var neg  = Config.clampTau(-5.0);
+        var cNan = Config.clampTau(nan);
+        var cInf = Config.clampTau(inf);
+        var ok   = Config.clampTau(30.0);
+        return zero >= 1.0 && sub1 >= 1.0 && neg >= 1.0
+            && cNan >= 1.0 && MathUtil.isFinite(cNan)
+            && MathUtil.isFinite(cInf)
+            && near(ok, 30.0, 1e-9);
+    }
+
+    (:test)
+    function testClampPositiveFloorsAndPasses(logger) {
+        var inf = posInf();
+        var nan = inf - inf;
+        var ftpBad = Config.clampPositive(0.0, 1.0);
+        var cpNeg  = Config.clampPositive(-240.0, 1.0);
+        var wNan   = Config.clampPositive(nan, 1.0);
+        var fRefZ  = Config.clampPositive(0.0, 0.1);
+        var ftpOk  = Config.clampPositive(250.0, 1.0);
+        return ftpBad >= 1.0 && cpNeg >= 1.0
+            && wNan >= 1.0 && MathUtil.isFinite(wNan)
+            && fRefZ >= 0.1
+            && near(ftpOk, 250.0, 1e-6);
+    }
+
+    (:test)
+    function testClampGateAboveGood(logger) {
+        var g = Constants.ARTIFACT_GOOD;
+        var zero = Config.clampGate(0.0);
+        var atGood = Config.clampGate(1.0);
+        var ok = Config.clampGate(5.0);
+        return zero > g && atGood > g && near(ok, 5.0, 1e-6);
+    }
+
+    (:test)
+    function testValidatedHrResetsDegeneratePairs(logger) {
+        var inf = posInf();
+        var swapped   = Config.validatedHr(60.0, 55.0);   // rest >= max
+        var tooTight  = Config.validatedHr(180.0, 190.0); // span 10 < 20
+        var subFloor  = Config.validatedHr(5.0, 190.0);   // rest below floor
+        var nonFinite = Config.validatedHr(inf, 190.0);
+        var normal    = Config.validatedHr(50.0, 190.0);
+        return (swapped[1] - swapped[0]) >= 20.0
+            && (tooTight[1] - tooTight[0]) >= 20.0
+            && (subFloor[1] - subFloor[0]) >= 20.0
+            && (nonFinite[1] - nonFinite[0]) >= 20.0
+            && subFloor[0] >= 20.0
+            && near(normal[0], 50.0, 1e-6) && near(normal[1], 190.0, 1e-6);
+    }
+
+    (:test)
+    function testClampedTauKeepsTransitionFinite(logger) {
+        // Mirror testObservabilityFNonDegenerate (:193-205) but feed HOSTILE taus
+        // THROUGH clampTau: the transition matrix stays finite and every decay
+        // factor 1-dt stays >= 0 (no divergence).
+        var tauHr  = Config.clampTau(0.0);     // was Inf
+        var tauA   = Config.clampTau(0.5);     // was negative decay
+        var tauRec = Config.clampTau(-100.0);  // was negative
+        var dtHr = 1.0 / tauHr; var dtA = 1.0 / tauA; var dtRec = 1.0 / tauRec;
+        var A = KalmanMath.zeros4x4();
+        A[1][0] = dtHr; A[1][1] = 1.0 - dtHr; A[1][3] = dtHr;
+        A[2][2] = 1.0 - dtA; A[2][3] = -dtA * 0.0167;
+        A[3][3] = 1.0 - dtRec;
+        var finiteOk = MathUtil.isFinite(A[1][0]) && MathUtil.isFinite(A[1][1])
+            && MathUtil.isFinite(A[2][2]) && MathUtil.isFinite(A[3][3]);
+        var decayOk = (1.0 - dtHr) >= 0.0 && (1.0 - dtA) >= 0.0 && (1.0 - dtRec) >= 0.0;
+        return finiteOk && decayOk;
+    }
+
+    // =====================================================================
+    //  #7 — Normalized Power / ledger int^4 overflow regressions
+    // =====================================================================
+
+    (:test)
+    function testNormalizedPowerConstantHighInt(logger) {
+        // #7: constant integer 300 W (300^4 ~ 8.1e9, past the 2.147e9 int32 limit)
+        // must give NP ~ 300 -> no overflow.
+        var p = [300, 300, 300, 300, 300];   // INTEGERS on purpose
+        var np = PrimitivesCalculator.normalizedPower(p);
+        return near(np, 300.0, 0.001);
+    }
+
+    (:test)
+    function testNormalizedPowerBoundary216Int(logger) {
+        // #7: exactly the 216 W int32-overflow edge named in the issue.
+        var np = PrimitivesCalculator.normalizedPower([216, 216, 216, 216]);
+        return near(np, 216.0, 0.001);
+    }
+
+    (:test)
+    function testNormalizedPowerHighIntVariable(logger) {
+        // Mixed high integer power lands in a sane range (NP ~ 348.5) and stays finite.
+        var np = PrimitivesCalculator.normalizedPower([250, 400, 250, 400]);
+        return near(np, 348.5, 0.5) && MathUtil.isFinite(np);
+    }
+
+    (:test)
+    function testNormalizedPowerNoOverflowVeryHigh(logger) {
+        // Single 1000 W sprint (1000^4 = 1e12) with zeros must give NP ~ 707.1.
+        // Assert the VALUE, not just > 0: a wrap that landed positive would pass a
+        // bare "> 0" check on unfixed code.
+        var np = PrimitivesCalculator.normalizedPower([1000, 0, 0, 0]);
+        return near(np, 707.1, 0.5) && MathUtil.isFinite(np);
+    }
+
+    (:test)
+    function testLedgerRideNpNoOverflowInt(logger) {
+        // #7 ledger path: integer power >= 216 W through TrainingLoadLedger.update
+        // must not overflow npSumPow4. Constant 300 W -> rideNp ~ 300 and a finite,
+        // positive ride load (TSS). Tolerance is looser than the static NP tests
+        // because npSumPow4 accumulates 600 single-precision Floats.
+        var cfg = new Config();
+        var ledger = new TrainingLoadLedger(cfg);
+        for (var i = 0; i < 600; i++) {
+            ledger.update(300, 150);         // INTEGER power on purpose
+        }
+        var np = ledger.rideNp();
+        var load = ledger.rideLoad();
+        return near(np, 300.0, 0.05) && MathUtil.isFinite(load) && load > 0.0;
+    }
+
+    // =====================================================================
+    //  #8 — Kalman finite-safety (symmetrize scrub, S-guard, self-heal)
+    // =====================================================================
+
+    (:test)
+    function testSymmetrizeScrubsNonFiniteDiagonal(logger) {
+        var inf = 1.0e30 * 1.0e30;
+        var nan = inf - inf;
+        var P = KalmanMath.zeros4x4();
+        P[0][0] = 5.0;
+        P[2][2] = inf;
+        P[3][3] = nan;
+        KalmanMath.symmetrize(P);
+        for (var i = 0; i < 4; i++) {
+            for (var j = 0; j < 4; j++) {
+                if (!MathUtil.isFinite(P[i][j])) { return false; }
+            }
+            if (P[i][i] < 1.0e-6) { return false; }
+        }
+        return true;
+    }
+
+    (:test)
+    function testSymmetrizeScrubsNonFiniteOffDiagonal(logger) {
+        var inf = 1.0e30 * 1.0e30;
+        var P = KalmanMath.zeros4x4();
+        P[0][3] = inf;   // avg (inf + 0)/2 = inf -> non-finite -> scrub both halves to 0
+        P[3][0] = 0.0;
+        KalmanMath.symmetrize(P);
+        return MathUtil.isFinite(P[0][3]) && MathUtil.isFinite(P[3][0])
+            && near(P[0][3], 0.0, 1e-12) && near(P[3][0], 0.0, 1e-12);
+    }
+
+    (:test)
+    function testScalarUpdateNonFiniteSGuard(logger) {
+        // Feed R = NaN (NOT +Inf). With +Inf the guard is vacuous: every gain
+        // PHt[i]/S = finite/Inf = +0, so x/P stay finite even with the guard
+        // removed. NaN is what actually exercises the !isFinite(S) branch: S =
+        // R + H·PHt = NaN, and WITHOUT the guard the gains PHt[i]/NaN = NaN would
+        // poison x (x[i] + NaN·innov = NaN). The result is finite here ONLY
+        // because the guard skips the channel and returns [x, P] unchanged -> so
+        // this assertion FAILS on pre-fix code and passes on the fixed code.
+        var inf = 1.0e30 * 1.0e30;
+        var nan = inf - inf;
+        var x = [0.0, 100.0, 0.75, 0.0];
+        var P = KalmanMath.zeros4x4();
+        P[1][1] = 25.0;
+        var H = [0.0, 1.0, 0.0, 0.0];
+        var r = KalmanMath.scalarUpdate(x, P, H, 120.0, nan);   // R NaN -> S NaN -> skip
+        return KalmanMath.isFiniteVector(r[0]) && KalmanMath.isFiniteMatrix(r[1]);
+    }
+
+    (:test)
+    function testScalarUpdateKeepsPFiniteFromNonFiniteP(logger) {
+        var inf = 1.0e30 * 1.0e30;
+        var x = [0.0, 100.0, 0.75, 0.0];
+        var P = KalmanMath.zeros4x4();
+        P[1][1] = 25.0;
+        P[0][3] = inf; P[3][0] = inf;   // off-diagonal poison OUTSIDE the H column -> S stays finite
+        var H = [0.0, 1.0, 0.0, 0.0];
+        var r = KalmanMath.scalarUpdate(x, P, H, 120.0, 4.0);   // proceeds; symmetrize at :81 scrubs
+        return KalmanMath.isFiniteMatrix(r[1]) && KalmanMath.isFiniteVector(r[0]);
+    }
+
+    (:test)
+    function testPredictKeepsPFiniteFromNonFiniteP(logger) {
+        var inf = 1.0e30 * 1.0e30;
+        var x = [0.0, 100.0, 0.75, 0.0];
+        var P = KalmanMath.zeros4x4();
+        P[0][0] = inf;                              // non-finite covariance entering predict
+        var A = KalmanMath.zeros4x4();
+        for (var i = 0; i < 4; i++) { A[i][i] = 1.0; }
+        var r = KalmanMath.predict(x, P, A, [0.0,0.0,0.0,0.0], [1.0,1.0,1.0,1.0]);
+        return KalmanMath.isFiniteMatrix(r[1]) && KalmanMath.isFiniteVector(r[0]);
+    }
+
+    (:test)
+    function testIsFiniteVectorAndMatrix(logger) {
+        var inf = 1.0e30 * 1.0e30;
+        var vBad = [1.0, inf, 3.0, 4.0];
+        var mBad = KalmanMath.zeros4x4();
+        mBad[2][3] = inf - inf;                     // NaN
+        return KalmanMath.isFiniteVector([1.0,2.0,3.0,4.0]) && !KalmanMath.isFiniteVector(vBad)
+            && KalmanMath.isFiniteMatrix(KalmanMath.zeros4x4()) && !KalmanMath.isFiniteMatrix(mBad);
+    }
+
+    (:test)
+    function testFilterSelfHealsFromNonFinitePower(logger) {
+        // Public-API integration (review-required #3/#4): one +Inf power sample must
+        // NOT latch. Control filter never sees it; injected filter gets +Inf at step
+        // 30. With the isFinite(power) gate the +Inf is treated as missing (falls
+        // back to lastKnownPower), so both trajectories stay finite, track together,
+        // and neither degrades — i.e. the filter self-heals instead of flooring.
+        var inf = 1.0e30 * 1.0e30;
+        var cfg = new Config();
+        var control  = new AcuteFatigueFilter(cfg);
+        var injected = new AcuteFatigueFilter(cfg);
+        var pw = cfg.pAeT + 80.0;
+        for (var i = 0; i < 90; i++) {
+            control.step(pw, 160.0, null, 100.0, 0.0, true, true);
+            var pInj = (i == 30) ? inf : pw;        // single poisoned sample mid-ride
+            injected.step(pInj, 160.0, null, 100.0, 0.0, true, true);
+        }
+        var finite = MathUtil.isFinite(injected.fState())
+              && MathUtil.isFinite(injected.afiKalman())
+              && MathUtil.isFinite(injected.latentHr());
+        var tracks = near(injected.fState(), control.fState(), 0.5);   // +Inf was ignored
+        return finite && tracks
+            && !injected.isDegraded()               // prevention: never latched
+            && !control.isDegraded();
+    }
+
+    (:test)
+    function testFilterResetBranchScrubsNonFiniteState(logger) {
+        // POSITIVE coverage for the self-heal RESET branch (§8.4). The prevention
+        // test above only drives the isFinite(power) gate; the degraded=true +
+        // x[S_HR]/x[S_HRSS] scrub branch is otherwise unreachable through the
+        // public API (finite-input dynamics + clamps keep x finite). We use the
+        // (:test)-only debugInjectNonFiniteState seam to poke a genuine NaN into
+        // the HR state, then a single step() must trip the finite check, latch
+        // isDegraded(), and scrub the poisoned component back to its safe seed.
+        var inf = 1.0e30 * 1.0e30;
+        var nan = inf - inf;
+        var cfg = new Config();
+        var filt = new AcuteFatigueFilter(cfg);
+        // index 1 == S_HR (a NEVER-clamped state, the exact gap the branch guards)
+        filt.debugInjectNonFiniteState(1, nan);
+        filt.step(cfg.pAeT + 80.0, 160.0, null, 100.0, 0.0, true, true);
+        // safe seed for HR states is cfg.hrRest + 20.0 (matches initState fallback)
+        return filt.isDegraded()
+            && MathUtil.isFinite(filt.latentHr())
+            && near(filt.latentHr(), cfg.hrRest + 20.0, 1e-6)
+            && MathUtil.isFinite(filt.fState())
+            && MathUtil.isFinite(filt.afiKalman())
+            && MathUtil.isFinite(filt.latentA1());
+    }
 }

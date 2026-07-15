@@ -73,9 +73,12 @@ class PrimitivesCalculator {
         if (powers == null || powers.size() == 0) { return 0.0; }
         var s = 0.0;
         for (var i = 0; i < powers.size(); i++) {
-            var p = powers[i];
-            if (p < 0) { p = 0; }
-            var p2 = p * p;
+            // #7: promote to Float BEFORE squaring. p*p*p*p in 32-bit int
+            // arithmetic wraps at 2.147e9, i.e. p >= 216 W. The += cannot
+            // rescue it — p2*p2 has already overflowed by then.
+            var pf = powers[i].toFloat();
+            if (pf < 0) { pf = 0.0; }
+            var p2 = pf * pf;
             s += p2 * p2;
         }
         var m = s / powers.size();
