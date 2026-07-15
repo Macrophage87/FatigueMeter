@@ -61,6 +61,83 @@ The **separate** model-consistency harness (Python) specified in
 across synthetic and real rides; it is regression protection, **not** external
 validity (there is no on-bike fatigue ground truth).
 
+## CI
+
+`.github/workflows/ci.yml` runs on every push to `main` and on every pull
+request. It is deliberately **lightweight**: every job runs on stock
+GitHub-hosted `ubuntu-latest` and needs **no self-hosted runner**. The lint
+jobs need no Connect IQ SDK at all; the compile/unit-test gate gets the SDK by
+running a pre-built Docker image as the job container (see `test` below).
+
+- **`manifest-lint`** — `scripts/check_manifest_appid.sh`, a packaging check
+  that guards the historical placeholder / store-reject app-id class (a bad
+  32-hex id, an all-zero or all-same-character id). A compile+test path cannot
+  see this — a bad id still compiles and still passes tests — which is exactly
+  why this cheap runner-free check exists.
+- **`test`** (advisory, `continue-on-error`) — the **compile + unit-test gate**.
+  It runs the pre-built `ghcr.io/matco/connectiq-tester` Docker image **as the
+  job `container`** (digest-pinned; `v2.8.0` = SDK `9.2.0`, incl. `edge1050`),
+  which ships the Connect IQ SDK and the "Run No Evil" `(:test)` framework, so it
+  runs the compile + off-device unit tests on a stock GitHub-hosted runner with
+  **no SDK download and no self-hosted runner**. It targets `edge1050`. The image
+  is run directly (not via the `matco/action-connectiq-tester` wrapper action)
+  because the action — and the image's own `tester.sh` entrypoint — hardcode
+  `monkeyc … -t -l 3` (type-check level 3 = **Strict**), which is incompatible
+  with this **intentionally untyped** Monkey C codebase (Strict emits hundreds of
+  "… is untyped" errors and aborts). A build step `sed`s that level down to `-l 1`
+  (**Gradual**) in-container before invoking the image's own `tester.sh` harness —
+  matching how the project actually builds (the "Build" section above uses no
+  `-l`). It is **advisory** for now so a broken/mismatched image cannot block
+  merges; once a real GitHub run confirms the image builds `edge1050` at `-l 1`
+  and the tests pass, promote it to required by adding `test` to `ci-required`'s
+  `needs`.
+- **`traceability`** (advisory, `continue-on-error`) —
+  `scripts/check_traceability.py` enforces "no physiological constant in
+  `source/Constants.mc` without a `docs/traceability.md` row." It is advisory
+  until the matcher is hardened; it can be promoted into the required set later
+  (add it to `ci-required`'s `needs`) once it no longer produces false
+  positives.
+- **`ci-required`** — the aggregator job that `needs: [manifest-lint]`. **This
+  is the single stable required status check** to require in branch protection
+  (with "require branches to be up to date before merging"). `traceability` is
+  advisory and stays out of the required set. Enabling the branch-protection
+  rule is a manual repo-admin step.
+
+The workflow uses no secrets and every `uses:` action is SHA-pinned, so fork-PR
+runs are safe. The PR trigger has **no `paths-ignore`** (the workflow always
+runs on PRs) so a `store/**`- or `LICENSE`-only PR still posts a `ci-required`
+status instead of sitting pending forever under "require branches up to date".
+
+### Compile/unit-test gate
+
+The compile + unit-test gate is provided by the **`test`** job above, which runs
+the `ghcr.io/matco/connectiq-tester` Docker image **as the job container**.
+Previously this gate was deferred because unattended Garmin SDK download on a
+GitHub-hosted runner is infeasible (EULA + manifest-gated, unpredictable zip
+URLs) and a self-hosted `connectiq` runner was the only obvious option. The
+pre-built image sidesteps that: the SDK (`9.2.0`, incl. `edge1050`) and the "Run
+No Evil" `(:test)` framework are baked in, so the gate runs on stock
+`ubuntu-latest` with no SDK download and no self-hosted runner.
+
+We run the image directly rather than via the `matco/action-connectiq-tester`
+wrapper action because the action and the image's `tester.sh` entrypoint hardcode
+`monkeyc … -t -l 3` (type-check level 3 = **Strict**), which is not exposed as an
+input/env. This repo is **untyped** Monkey C, so Strict aborts with hundreds of
+"… is untyped" errors. The `test` job therefore `sed`s the level down to `-l 1`
+(**Gradual**, the type-check level suited to an untyped codebase — matching the
+project's own build, which passes no `-l`) inside the container, then invokes the
+image's own `tester.sh` (compile + `xvfb` + `monkeydo` + PASSED/FAILED parsing).
+The image is **pinned by digest** for supply-chain safety; the digest currently
+corresponds to `v2.8.0` (SDK 9.2.0).
+
+The job is **advisory** (`continue-on-error: true`, and not in `ci-required`'s
+`needs`) until a real GitHub run confirms the image builds `edge1050` at `-l 1`
+and the tests pass — so a broken or mismatched image cannot block merges. Once a
+green run is observed, **promote it to required** by adding `test` to
+`ci-required`'s `needs`. (If `-l 1` still trips on untyped code, the next step
+down is `-l 0` = Silent.) The SDK-dependent checks can still be run locally (see
+"Build" and "Unit tests" above).
+
 ## Sideload to an Edge 1050
 
 1. Build `bin/FatigueMeter.prg` as above.
