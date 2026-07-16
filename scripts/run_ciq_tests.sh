@@ -68,11 +68,13 @@ for _ in $(seq 1 30); do
 done
 [ "$xready" = 1 ] || { echo "::error::Xvfb not ready on :${DNUM}"; exit 1; }
 
-# `connectiq` is a launcher that forks the real "$SIM_PROC" and returns, so
-# liveness is checked by process NAME, not the launcher's PID. Give the launcher
-# a startup grace so the pgrep-death check cannot false-fail during its fork
-# window (#42 re-review round 2, item 3).
-connectiq >/dev/null 2>&1 &
+# Launch the simulator EXACTLY as the image's own tester.sh does -- `simulator`
+# directly (not the `connectiq` wrapper). tester.sh is the reference that runs
+# monkeydo successfully; when we launched via `connectiq` instead, the sim came
+# up and monkeydo connected but then hung to the timeout (PR #43 run 26), so we
+# mirror the proven invocation. Liveness is still checked by process NAME. Give a
+# startup grace so the pgrep-death check cannot false-fail during launch.
+simulator >/dev/null 2>&1 &
 sleep 5
 
 ready=0
@@ -90,9 +92,17 @@ if [ "$ready" != 1 ]; then
 fi
 
 set +e
-timeout --signal=KILL "${RUN_TIMEOUT}" monkeydo "$PRG" "$DEVICE" -t 2>&1 | tee "$LOG"
-rc=${PIPESTATUS[0]}
+timeout --signal=KILL "${RUN_TIMEOUT}" monkeydo "$PRG" "$DEVICE" -t >"$LOG" 2>&1
+rc=$?
 set -e
+
+# ALWAYS echo the captured output into the job log so its exact format is
+# readable via the Actions API even when the artifact blob download is blocked;
+# it is also what the parser patterns get pinned from.
+echo "===== BEGIN sim-run.log (monkeydo output) ====="
+cat "$LOG" || true
+echo "===== END sim-run.log ====="
+
 if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
   echo "::error::monkeydo timed out after ${RUN_TIMEOUT}s"; exit 1
 fi
