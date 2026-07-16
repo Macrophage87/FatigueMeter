@@ -3,10 +3,11 @@
 # -----------------------------------------------------------------------------
 # All jobs run on stock GitHub-hosted `ubuntu-latest`: NO self-hosted runner and
 # NO Garmin SDK download/config is required. The lint jobs need no Connect IQ SDK
-# at all; the compile gate (`test`) gets the SDK by running the pre-built
-# matco/connectiq-tester Docker IMAGE as the job `container` (SDK 9.2.0, edge1050)
-# and compiles the `--unit-test` build. It is ADVISORY (`continue-on-error`);
-# actually RUNNING the tests (monkeydo under xvfb) is a deferred follow-up.
+# at all; the SDK-backed gates (`test` = compile every device `--unit-test`;
+# `simulate` = actually RUN the (:test) suite headlessly) get the SDK by running
+# the pre-built matco/connectiq-tester Docker IMAGE as the job `container`
+# (SDK 9.2.0). Both are now REQUIRED via `ci-required` (#42); `traceability`
+# stays advisory.
 # =============================================================================
 name: CI
 on:
@@ -70,15 +71,16 @@ jobs:
   # We compile all devices in ONE job (a shell loop) rather than a GitHub matrix
   # so the ~large SDK image is pulled ONCE, not once per device.
   #
-  # ADVISORY (`continue-on-error: true`, and NOT in `ci-required`'s `needs`): a
-  # broken/mismatched image must not block merges. Promote to REQUIRED (add
-  # `test` to `ci-required.needs`, drop `continue-on-error`) after it has a green
-  # track record -- see #42.
+  # REQUIRED (#42): in `ci-required.needs`, no continue-on-error. A --unit-test
+  # compile failure on any device blocks merges. (If the pinned image ever breaks
+  # in a way unrelated to our code, demote temporarily by restoring
+  # continue-on-error / removing it from ci-required.needs.)
   test:
-    name: Compile --unit-test, all devices (advisory)
+    name: Compile --unit-test, all devices
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    continue-on-error: true
+    # REQUIRED (#42): no continue-on-error; in ci-required.needs. A --unit-test
+    # compile failure on any device now blocks merges.
     container:
       # Pinned by immutable digest for supply-chain safety. This digest is the
       # `v2.8.0` == `latest` build of ghcr.io/matco/connectiq-tester (Connect IQ
@@ -139,16 +141,16 @@ jobs:
   # gone the run step launches the ONLY sim; run_ciq_tests.sh also pkills any
   # pre-existing sim at entry as a belt-and-suspenders guard.
   #
-  # ADVISORY (`continue-on-error: true`, NOT in `ci-required.needs`). Promote to
-  # REQUIRED only after the first run is confirmed genuinely green (single Xvfb/
-  # sim, ran==passed==expected, failed==0, errors==0; 47/47 today) -- see #42.
-  # Until then it can never wedge
-  # `main`.
+  # REQUIRED (#42): promoted after a confirmed genuinely-green run (single Xvfb/
+  # sim, ran==passed==expected, failed==0, errors==0; 47/47). No continue-on-error;
+  # in ci-required.needs. A test failure, a dropped count, or zero tests run now
+  # blocks merges. NOTE: this executes a headless Qt sim -- if it ever flakes it
+  # can block merges until re-run; re-run the job, and if a genuine flake pattern
+  # emerges, revisit demoting it back to advisory.
   simulate:
-    name: Run unit tests (advisory)
+    name: Run unit tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    continue-on-error: true
     container:
       # Same digest-pinned image as the compile gate (SDK 9.2.0). The digest IS
       # the pin; the tag comment is informational.
@@ -194,13 +196,14 @@ jobs:
       - run: python3 scripts/check_traceability.py
 
   # -------------------------------------------------- required-check aggregator
-  # Single stable status-check name to require in branch protection. Only the
-  # non-advisory jobs are in `needs`; `traceability` is advisory and stays out
-  # of the required set.
+  # Single stable status-check name to require in branch protection. Lists every
+  # REQUIRED job; `traceability` stays advisory and out of the set. If any needed
+  # job fails, this job is SKIPPED (never "success"), so branch protection that
+  # requires the `ci-required` context blocks the merge.
   ci-required:
     name: ci-required
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [ manifest-lint ]
+    needs: [ manifest-lint, test, simulate ]
     steps:
-      - run: echo "manifest lint passed"
+      - run: echo "manifest lint + compile + unit-test run all passed"
