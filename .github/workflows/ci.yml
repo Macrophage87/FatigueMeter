@@ -3,10 +3,10 @@
 # -----------------------------------------------------------------------------
 # All jobs run on stock GitHub-hosted `ubuntu-latest`: NO self-hosted runner and
 # NO Garmin SDK download/config is required. The lint jobs need no Connect IQ SDK
-# at all; the compile+unit-test gate (`test`) gets the SDK by running the pre-built
+# at all; the compile gate (`test`) gets the SDK by running the pre-built
 # matco/connectiq-tester Docker IMAGE as the job `container` (SDK 9.2.0, edge1050)
-# and is currently ADVISORY (`continue-on-error`) until a real GitHub run proves
-# it green.
+# and compiles the `--unit-test` build. It is ADVISORY (`continue-on-error`);
+# actually RUNNING the tests (monkeydo under xvfb) is a deferred follow-up.
 # =============================================================================
 name: CI
 on:
@@ -43,56 +43,77 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
       - run: ./scripts/check_manifest_appid.sh
 
-  # ------------------------------------------------- compile + unit-test gate
-  # SDK-backed compile + "Run No Evil" (:test) unit-test gate. We run the pre-built
-  # matco/connectiq-tester Docker IMAGE as the job `container` (rather than the
-  # matco/action-connectiq-tester wrapper action) so it runs on a stock
-  # GitHub-hosted runner with NO self-hosted runner and NO Garmin SDK
-  # download/config, while letting us adjust the compile flags in-container.
+  # ------------------------------------------------- compile (--unit-test) gate
+  # SDK-backed compile gate. We run the pre-built matco/connectiq-tester Docker
+  # IMAGE as the job `container` (rather than the matco/action-connectiq-tester
+  # wrapper action) so it runs on a stock GitHub-hosted runner with NO self-hosted
+  # runner and NO Garmin SDK download/config, while letting us pick the exact
+  # compile command.
   #
-  # WHY NOT THE ACTION: the action (and the image's own ENTRYPOINT `tester.sh`)
-  # hardcode `monkeyc ... -t -l 3` (type-check level 3 = STRICT). This codebase is
-  # intentionally UNTYPED Monkey C, so Strict mode emits hundreds of "... is
-  # untyped" / "Cannot determine type" errors and aborts. The level is NOT exposed
-  # as an action input/env, so we run the image directly and `sed` the level down
-  # to 1 (Gradual) — which matches how the project actually builds (BUILD.md uses
-  # no `-l`). We still reuse the image's proven `tester.sh` harness (compile +
-  # xvfb + monkeydo + PASSED/FAILED parsing).
+  # WHY COMPILE-ONLY: this compiles the `--unit-test` build (the BUILD.md test
+  # command, `-w`) for EVERY device in manifest.xml. That is DETERMINISTIC (~7s
+  # each) and already catches the crash-class this project cares about:
+  # illegal-API-for-datafield regressions, test-compilation breakage, and the
+  # monkeyc constant-folder crash fixed in #9 -- across all supported devices,
+  # not just edge1050. Actually RUNNING the 41 `(:test)` functions (monkeydo
+  # under xvfb) is deferred: the image's `tester.sh` hangs because it has no
+  # simulator-readiness probe (seen on #40's run). That work is tracked in #42
+  # (bounded readiness probe -> run -> strict PASS/FAIL parse -> promote to
+  # required).
   #
-  # ADVISORY for now (`continue-on-error: true`, and NOT in `ci-required`'s
-  # `needs`): a broken/mismatched image must not block merges until a real
-  # GitHub run confirms the image builds `edge1050` and the tests pass. Promote
-  # to REQUIRED (add `test` to `ci-required.needs`) only after a green run.
+  # NOTE: we deliberately do NOT pass `-l 3` (strict). This repo is intentionally
+  # UNTYPED Monkey C; BUILD.md compiles with no `-l` (default level), which is
+  # what we mirror here. We DO pass `-w` (warnings -> errors) so test-compile
+  # warnings and illegal-API-in-datafield warnings fail the build.
+  #
+  # We compile all devices in ONE job (a shell loop) rather than a GitHub matrix
+  # so the ~large SDK image is pulled ONCE, not once per device.
+  #
+  # ADVISORY (`continue-on-error: true`, and NOT in `ci-required`'s `needs`): a
+  # broken/mismatched image must not block merges. Promote to REQUIRED (add
+  # `test` to `ci-required.needs`, drop `continue-on-error`) after it has a green
+  # track record -- see #42.
   test:
-    name: Compile + unit tests (advisory)
+    name: Compile --unit-test, all devices (advisory)
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     continue-on-error: true
     container:
       # Pinned by immutable digest for supply-chain safety. This digest is the
       # `v2.8.0` == `latest` build of ghcr.io/matco/connectiq-tester (Connect IQ
-      # SDK 9.2.0, which includes edge1050 device defs). The digest IS the pin;
+      # SDK 9.2.0, which ships ALL the device defs below). The digest IS the pin;
       # the tag in this comment is informational. Bump deliberately when adopting
       # a newer SDK.
-      image: ghcr.io/matco/connectiq-tester@sha256:7a6f586cb0e0393ff288da09cf27b6dad40a0058a346c529b99fd0fc19858f0f   # v2.8.0 = SDK 9.2.0, edge1050
+      image: ghcr.io/matco/connectiq-tester@sha256:7a6f586cb0e0393ff288da09cf27b6dad40a0058a346c529b99fd0fc19858f0f   # v2.8.0 = SDK 9.2.0
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
-      - name: Lower hardcoded type-check level (untyped codebase; strict -l 3 is incompatible)
+      - name: Compile --unit-test for every manifest device
         run: |
-          set -eux
-          # The image's ENTRYPOINT tester.sh hardcodes 'monkeyc ... -t -l 3'; this
-          # repo is untyped Monkey C. Rewrite the level to 1 (Gradual), matching
-          # how the project actually builds (BUILD.md uses no -l). The regex is
-          # whitespace-robust in case spacing changes (e.g. '-l3').
-          test -f /connectiq/bin/tester.sh
-          sed -i -E 's/-l[[:space:]]*3/-l 1/g' /connectiq/bin/tester.sh
-          grep -n 'monkeyc' /connectiq/bin/tester.sh || true
-      - name: Run Connect IQ unit tests (edge1050)
-        # tester.sh positional args are ($1=DEVICE_ID, $2=CERTIFICATE_PATH); it
-        # compiles monkey.jungle in the CWD (the checked-out workspace) and
-        # generates a throwaway certificate when none is given. So we pass only
-        # the device and run from the repo root.
-        run: bash /connectiq/bin/tester.sh edge1050
+          set -eu
+          # BUILD.md generates a throwaway developer key with these two openssl
+          # commands; monkeyc requires a signing key even for a unit-test build.
+          # It lives only in the runner workspace and is never committed.
+          if ! command -v openssl >/dev/null 2>&1; then apt-get update && apt-get install -y openssl; fi
+          openssl genrsa -out developer_key.pem 4096
+          openssl pkcs8 -topk8 -inform PEM -outform DER \
+              -in developer_key.pem -out developer_key.der -nocrypt
+          mkdir -p bin
+          # Every product id in manifest.xml. Keep in sync when the product list
+          # changes.
+          rc=0
+          for dev in edge1050 edge1040 edge840 edge540 edgeexplore2 fr965 fr955 fenix7x; do
+            echo "== compiling --unit-test for $dev =="
+            # EXACT BUILD.md unit-test compile command (see BUILD.md "Unit tests"),
+            # plus -w (warnings -> errors).
+            if monkeyc -f monkey.jungle -o "bin/FatigueMeter-test-$dev.prg" \
+                 -y developer_key.der -d "$dev" --unit-test -w; then
+              echo "OK: $dev"
+            else
+              echo "::error::--unit-test compile FAILED for $dev"; rc=1
+            fi
+          done
+          [ "$rc" = 0 ] && echo "unit-test build OK (all devices)"
+          exit "$rc"
 
   # --------------------------------------------------------- traceability lint
   traceability:
