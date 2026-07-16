@@ -531,4 +531,77 @@ module PureFunctionTests {
             && MathUtil.isFinite(filt.afiKalman())
             && MathUtil.isFinite(filt.latentA1());
     }
+
+    // ----------------------------------------------------------- Metric (#21)
+    // The Metric "never carries NaN/Inf" invariant (§8.4): a non-finite value is
+    // dropped to null + AVAIL_UNAVAILABLE at the single construction choke point,
+    // isUsable()/isPresent() finiteness-gate (closing the public-var mutation
+    // hole), and quality is clamped to [0,1]. Non-finite sentinels use the
+    // runtime posInf() helper -- a literal like 1.0e40 is out of Monkey C Float
+    // range and risks the SDK 9.2.0 constant-folder crash (#9).
+
+    (:test)
+    function testMetricRejectsNaNValue(logger) {
+        // A NaN value must not yield a usable/present Metric; the tile greys out.
+        var inf = posInf();
+        var nan = inf - inf;                          // genuine NaN (NaN != NaN)
+        var m = Signals.Metric.ok(nan, 1.0);
+        return m.value == null
+               && m.availability == Signals.AVAIL_UNAVAILABLE
+               && !m.isUsable() && !m.isPresent();
+    }
+
+    (:test)
+    function testMetricRejectsInfValue(logger) {
+        // Non-finite magnitude is dropped just like NaN.
+        var m = Signals.Metric.ok(posInf(), 1.0);
+        return m.value == null
+               && m.availability == Signals.AVAIL_UNAVAILABLE
+               && !m.isUsable() && !m.isPresent();
+    }
+
+    (:test)
+    function testMetricLowConfRejectsNonFinite(logger) {
+        // The lowConf() factory (named in the issue) must also drop a non-finite
+        // value -- a lowConf downgrade would otherwise RETAIN the NaN and
+        // re-violate the invariant.
+        var inf = posInf();
+        var nan = inf - inf;
+        var m = Signals.Metric.lowConf(nan, 0.5, "decoup");
+        return m.value == null
+               && m.availability == Signals.AVAIL_UNAVAILABLE
+               && !m.isUsable() && !m.isPresent();
+    }
+
+    (:test)
+    function testMetricClampsQuality(logger) {
+        // quality is confidence in [0,1]; over/under-range and NaN are repaired,
+        // and a finite value survives the quality scrub.
+        var hi = Signals.Metric.ok(50.0, 2.5);        // -> 1.0
+        var lo = Signals.Metric.ok(50.0, -0.5);       // -> 0.0
+        var inf = posInf();
+        var nanQ = Signals.Metric.ok(50.0, inf - inf); // NaN -> 0.0, value stays
+        return near(hi.quality, 1.0, 1e-9)
+               && near(lo.quality, 0.0, 1e-9)
+               && near(nanQ.quality, 0.0, 1e-9)
+               && nanQ.isUsable();                    // finite value must survive
+    }
+
+    (:test)
+    function testMetricFiniteValuePreserved(logger) {
+        // A valid finite value + in-range quality must pass through untouched.
+        var m = Signals.Metric.ok(42.0, 0.8);
+        return near(m.value, 42.0, 1e-9) && near(m.quality, 0.8, 1e-9)
+               && m.isUsable() && m.isPresent();
+    }
+
+    (:test)
+    function testMetricGuardsPostMutation(logger) {
+        // Fields are public; a value mutated to NaN after construction must
+        // still be rejected by isUsable()/isPresent().
+        var m = Signals.Metric.ok(42.0, 1.0);
+        var inf = posInf();
+        m.value = inf - inf;                          // NaN injected past the ctor
+        return !m.isUsable() && !m.isPresent();
+    }
 }
