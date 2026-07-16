@@ -51,39 +51,45 @@ jobs:
   # compile command.
   #
   # WHY COMPILE-ONLY: this compiles the `--unit-test` build (the BUILD.md test
-  # command) for edge1050. That is DETERMINISTIC (~10s) and already catches the
-  # crash-class this project cares about: illegal-API-for-datafield regressions,
-  # test-compilation breakage, and the monkeyc constant-folder crash fixed in #9.
-  # Running the tests (monkeydo under xvfb via the image's `tester.sh`) is
-  # deferred: that path hangs on the matco image because tester.sh has no
-  # simulator-readiness probe. Actually executing the tests is tracked as a
-  # separate follow-up (add a bounded readiness probe, then run + parse).
+  # command, `-w`) for EVERY device in manifest.xml. That is DETERMINISTIC (~7s
+  # each) and already catches the crash-class this project cares about:
+  # illegal-API-for-datafield regressions, test-compilation breakage, and the
+  # monkeyc constant-folder crash fixed in #9 -- across all supported devices,
+  # not just edge1050. Actually RUNNING the 41 `(:test)` functions (monkeydo
+  # under xvfb) is deferred: the image's `tester.sh` hangs because it has no
+  # simulator-readiness probe (seen on #40's run). That work is tracked in #42
+  # (bounded readiness probe -> run -> strict PASS/FAIL parse -> promote to
+  # required).
   #
   # NOTE: we deliberately do NOT pass `-l 3` (strict). This repo is intentionally
   # UNTYPED Monkey C; BUILD.md compiles with no `-l` (default level), which is
-  # what we mirror here.
+  # what we mirror here. We DO pass `-w` (warnings -> errors) so test-compile
+  # warnings and illegal-API-in-datafield warnings fail the build.
+  #
+  # We compile all devices in ONE job (a shell loop) rather than a GitHub matrix
+  # so the ~large SDK image is pulled ONCE, not once per device.
   #
   # ADVISORY (`continue-on-error: true`, and NOT in `ci-required`'s `needs`): a
   # broken/mismatched image must not block merges. Promote to REQUIRED (add
   # `test` to `ci-required.needs`, drop `continue-on-error`) after it has a green
-  # track record.
+  # track record -- see #42.
   test:
-    name: Compile --unit-test (advisory)
+    name: Compile --unit-test, all devices (advisory)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     continue-on-error: true
     container:
       # Pinned by immutable digest for supply-chain safety. This digest is the
       # `v2.8.0` == `latest` build of ghcr.io/matco/connectiq-tester (Connect IQ
-      # SDK 9.2.0, which includes edge1050 device defs). The digest IS the pin;
+      # SDK 9.2.0, which ships ALL the device defs below). The digest IS the pin;
       # the tag in this comment is informational. Bump deliberately when adopting
       # a newer SDK.
-      image: ghcr.io/matco/connectiq-tester@sha256:7a6f586cb0e0393ff288da09cf27b6dad40a0058a346c529b99fd0fc19858f0f   # v2.8.0 = SDK 9.2.0, edge1050
+      image: ghcr.io/matco/connectiq-tester@sha256:7a6f586cb0e0393ff288da09cf27b6dad40a0058a346c529b99fd0fc19858f0f   # v2.8.0 = SDK 9.2.0
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
-      - name: Compile --unit-test (edge1050)
+      - name: Compile --unit-test for every manifest device
         run: |
-          set -eux
+          set -eu
           # BUILD.md generates a throwaway developer key with these two openssl
           # commands; monkeyc requires a signing key even for a unit-test build.
           # It lives only in the runner workspace and is never committed.
@@ -92,10 +98,22 @@ jobs:
           openssl pkcs8 -topk8 -inform PEM -outform DER \
               -in developer_key.pem -out developer_key.der -nocrypt
           mkdir -p bin
-          # EXACT BUILD.md unit-test compile command (see BUILD.md "Unit tests").
-          monkeyc -f monkey.jungle -o bin/FatigueMeter-test.prg \
-              -y developer_key.der -d edge1050 --unit-test
-          echo "unit-test build OK"
+          # Every product id in manifest.xml. Keep in sync when the product list
+          # changes.
+          rc=0
+          for dev in edge1050 edge1040 edge840 edge540 edgeexplore2 fr965 fr955 fenix7x; do
+            echo "== compiling --unit-test for $dev =="
+            # EXACT BUILD.md unit-test compile command (see BUILD.md "Unit tests"),
+            # plus -w (warnings -> errors).
+            if monkeyc -f monkey.jungle -o "bin/FatigueMeter-test-$dev.prg" \
+                 -y developer_key.der -d "$dev" --unit-test -w; then
+              echo "OK: $dev"
+            else
+              echo "::error::--unit-test compile FAILED for $dev"; rc=1
+            fi
+          done
+          [ "$rc" = 0 ] && echo "unit-test build OK (all devices)"
+          exit "$rc"
 
   # --------------------------------------------------------- traceability lint
   traceability:
