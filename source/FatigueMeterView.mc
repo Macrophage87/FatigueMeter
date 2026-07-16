@@ -53,6 +53,25 @@ class FatigueMeterView extends WatchUi.DataField {
     hidden var dPowerAvail;
     hidden var dStationary;
 
+    //! Conservative NODATA defaults written at construction BEFORE the guarded
+    //! collaborator build (§8.4, #13): if that build throws, the field is left on
+    //! this safe, HONEST snapshot -- numeric AFI LOCKED, "uncalibrated" tag, NODATA
+    //! status, max uncertainty -- so a construction fault never over-claims. Static
+    //! + pure so these values can be unit-tested (a DataField subclass cannot be
+    //! instantiated off-device, but a static helper can).
+    static function defaultSnapshot() {
+        return {
+            :status          => DescriptiveStrings.STATUS_NODATA,
+            :afi             => null,
+            :afiUnc          => 100.0,   // max uncertainty
+            :numericUnlocked => false,   // numeric AFI stays LOCKED until a clean build
+            :calibrated      => false,   // show the "uncalibrated" tag until proven
+            :priorDominated  => true,
+            :powerAvail      => false,
+            :stationary      => false
+        };
+    }
+
     function initialize() {
         DataField.initialize();
         ready = false;
@@ -69,21 +88,22 @@ class FatigueMeterView extends WatchUi.DataField {
         peakAfi = 0.0;
         lastFreshMatchCount = 0;
 
-        dStatus = { :status => DescriptiveStrings.STATUS_NODATA, :redKind => "none",
+        var snap = defaultSnapshot();
+        dStatus = { :status => snap[:status], :redKind => "none",
                     :advisoryActive => false, :alpha1Gated => true, :decoupOnly => true };
-        dAfi = null; dAfiUnc = 100.0;
+        dAfi = snap[:afi]; dAfiUnc = snap[:afiUnc];
         dDecoup = Signals.Metric.unavailable("--");
         dAlpha1 = Signals.Metric.unavailable("no RR");
         dArtifact = null;
         dKjw = 0.0; dKjTotal = 0.0; dWmatches = 0;
         dBest1 = 0.0; dBest5 = 0.0; dBest20 = 0.0;
-        dNumericUnlocked = false;   // conservative until a clean build proves otherwise
-        dCalibrated = false;        // conservative: show the "uncalibrated" tag
+        dNumericUnlocked = snap[:numericUnlocked];   // conservative: numeric AFI LOCKED
+        dCalibrated = snap[:calibrated];             // conservative: "uncalibrated" tag
         dSourceSwitched = false;
-        dPriorDominated = true;
+        dPriorDominated = snap[:priorDominated];
         dRedKind = "none";
-        dPowerAvail = false;
-        dStationary = false;
+        dPowerAvail = snap[:powerAvail];
+        dStationary = snap[:stationary];
 
         // Guarded construction (mirrors registerSensors()): a corrupt/legacy
         // property that makes any collaborator ctor or a Storage/Properties read
