@@ -55,7 +55,8 @@ jobs:
   # each) and already catches the crash-class this project cares about:
   # illegal-API-for-datafield regressions, test-compilation breakage, and the
   # monkeyc constant-folder crash fixed in #9 -- across all supported devices,
-  # not just edge1050. Actually RUNNING the 41 `(:test)` functions (monkeydo
+  # not just edge1050. Actually RUNNING the `(:test)` functions (47 today, but the
+  # gate self-computes the count from source, so this comment can't go stale) (monkeydo
   # under xvfb) is deferred: the image's `tester.sh` hangs because it has no
   # simulator-readiness probe (seen on #40's run). That work is tracked in #42
   # (bounded readiness probe -> run -> strict PASS/FAIL parse -> promote to
@@ -114,6 +115,70 @@ jobs:
           done
           [ "$rc" = 0 ] && echo "unit-test build OK (all devices)"
           exit "$rc"
+
+  # --------------------------------------------------- run unit tests (advisory)
+  # Runtime gate (#42): actually EXECUTE the (:test) functions, not just compile.
+  # SEPARATE from the compile gate so a simulator flake never masks a compile
+  # regression. It compiles edge1050 --unit-test (pure/device-independent tests;
+  # the compile job already covers all 8 devices), then runs it via
+  # scripts/run_ciq_tests.sh, whose bounded simulator-READINESS PROBE + hard
+  # `timeout` make it fail-FAST rather than hang the way the image's tester.sh
+  # does (the failure that made #40's run unusable). The strict fail-closed
+  # parser (scripts/check_ciq_tests.py) never trusts the runner exit code.
+  #
+  # PINNED VALUES (confirmed by the DIAGNOSTIC step over PR #43 runs 24 & 25):
+  # the `connectiq` launcher forks `/connectiq/bin/simulator`, which LISTENs on
+  # 0.0.0.0:1234 -> CIQ_SIM_PORT=1234, CIQ_SIM_PROC=simulator (defaults in
+  # run_ciq_tests.sh). The one-time DIAGNOSTIC step has been REMOVED now that
+  # those are pinned: it launched its own sim on display :98 and, although it
+  # trapped cleanup of its Xvfb + launcher, the forked `simulator` CHILD survived
+  # into the run step -- a stale, display-less sim that no longer listened on
+  # :1234 yet kept `pgrep -f simulator` alive, so the run step's readiness probe
+  # could never see :1234 come up and never tripped its liveness check (the exact
+  # "diagnostic process leak" the #42 round-2 panel flagged). With the diagnostic
+  # gone the run step launches the ONLY sim; run_ciq_tests.sh also pkills any
+  # pre-existing sim at entry as a belt-and-suspenders guard.
+  #
+  # ADVISORY (`continue-on-error: true`, NOT in `ci-required.needs`). Promote to
+  # REQUIRED only after the first run is confirmed genuinely green (single Xvfb/
+  # sim, ran==passed==expected, failed==0, errors==0; 47/47 today) -- see #42.
+  # Until then it can never wedge
+  # `main`.
+  simulate:
+    name: Run unit tests (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    container:
+      # Same digest-pinned image as the compile gate (SDK 9.2.0). The digest IS
+      # the pin; the tag comment is informational.
+      image: ghcr.io/matco/connectiq-tester@sha256:7a6f586cb0e0393ff288da09cf27b6dad40a0058a346c529b99fd0fc19858f0f   # v2.8.0 = SDK 9.2.0
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+      - name: Ensure tools present (guarded, like the compile job's openssl)
+        run: |
+          set -eux
+          need() { command -v "$1" >/dev/null 2>&1; }
+          if need openssl && need Xvfb && need xdpyinfo && need ss && need pgrep; then exit 0; fi
+          apt-get update
+          apt-get install -y openssl xvfb x11-utils iproute2 procps
+      - name: Compile --unit-test (edge1050)
+        run: |
+          set -eux
+          openssl genrsa -out developer_key.pem 4096
+          openssl pkcs8 -topk8 -inform PEM -outform DER \
+              -in developer_key.pem -out developer_key.der -nocrypt
+          mkdir -p bin
+          monkeyc -f monkey.jungle -o bin/FatigueMeter-test.prg \
+              -y developer_key.der -d edge1050 --unit-test
+      - name: Run tests headlessly (readiness probe + hard timeout)
+        run: bash scripts/run_ciq_tests.sh bin/FatigueMeter-test.prg edge1050
+      - name: Upload sim run log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4.6.2
+        with:
+          name: sim-run-log
+          path: sim-run.log
 
   # --------------------------------------------------------- traceability lint
   traceability:
