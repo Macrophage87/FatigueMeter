@@ -32,9 +32,20 @@ port_listening() {
     || ss -ltn 2>/dev/null | grep -qE "[:.]${SIM_PORT}([[:space:]]|\$)"
 }
 
-# Fail-fast if a stale X server or the sim port is already up at entry (e.g. a
-# server leaked from a prior step) -- otherwise we would test against the WRONG
-# server and a green run would be untrustworthy (#42 re-review round 2, item 2).
+# Belt-and-suspenders: reap any pre-existing simulator that leaked from an
+# earlier step in this job before we assert a clean slate. A leaked sim may be
+# display-less and NOT listening on the port (so the port guard below misses it)
+# yet still keeps `pgrep -f simulator` alive, which would wedge the readiness
+# loop (#42 re-review round 2, item 2; the diagnostic-leak actually observed on
+# PR #43 run 25). This script owns the sim lifecycle in the `simulate` job.
+if pgrep -f "$SIM_PROC" >/dev/null 2>&1; then
+  echo "note: reaping pre-existing '$SIM_PROC' process(es) before start"
+  pkill -f "$SIM_PROC" 2>/dev/null || true
+  sleep 2
+fi
+
+# Fail-fast if a stale X server or the sim port is STILL up at entry -- otherwise
+# we would test against the WRONG server and a green run would be untrustworthy.
 if [ -e "/tmp/.X11-unix/X${DNUM}" ]; then
   echo "::error::display :${DNUM} already in use at entry"; exit 1
 fi

@@ -125,17 +125,23 @@ jobs:
   # does (the failure that made #40's run unusable). The strict fail-closed
   # parser (scripts/check_ciq_tests.py) never trusts the runner exit code.
   #
-  # DIAGNOSTIC-FIRST: a one-time step captures the sim's real launch/IPC-port/
-  # process name and the runner's output format into the run log, so the parser
-  # patterns and CIQ_SIM_PORT/CIQ_SIM_PROC can be pinned exactly. It runs on a
-  # SEPARATE display (:98) with its own trap-cleanup so it cannot leak an Xvfb/
-  # sim server into the run step's :99 (which itself fails-fast if :99/the port
-  # is already busy at entry).
+  # PINNED VALUES (confirmed by the DIAGNOSTIC step over PR #43 runs 24 & 25):
+  # the `connectiq` launcher forks `/connectiq/bin/simulator`, which LISTENs on
+  # 0.0.0.0:1234 -> CIQ_SIM_PORT=1234, CIQ_SIM_PROC=simulator (defaults in
+  # run_ciq_tests.sh). The one-time DIAGNOSTIC step has been REMOVED now that
+  # those are pinned: it launched its own sim on display :98 and, although it
+  # trapped cleanup of its Xvfb + launcher, the forked `simulator` CHILD survived
+  # into the run step -- a stale, display-less sim that no longer listened on
+  # :1234 yet kept `pgrep -f simulator` alive, so the run step's readiness probe
+  # could never see :1234 come up and never tripped its liveness check (the exact
+  # "diagnostic process leak" the #42 round-2 panel flagged). With the diagnostic
+  # gone the run step launches the ONLY sim; run_ciq_tests.sh also pkills any
+  # pre-existing sim at entry as a belt-and-suspenders guard.
   #
   # ADVISORY (`continue-on-error: true`, NOT in `ci-required.needs`). Promote to
   # REQUIRED only after the first run is confirmed genuinely green (single Xvfb/
-  # sim, ran==passes==41, failed==0) and the diagnostic values are pinned -- see
-  # #42. Until then it can never wedge `main`.
+  # sim, ran==passes==41, failed==0) -- see #42. Until then it can never wedge
+  # `main`.
   simulate:
     name: Run unit tests (advisory)
     runs-on: ubuntu-latest
@@ -154,26 +160,6 @@ jobs:
           if need openssl && need Xvfb && need xdpyinfo && need ss && need pgrep; then exit 0; fi
           apt-get update
           apt-get install -y openssl xvfb x11-utils iproute2 procps
-      - name: DIAGNOSTIC (one-time) — pin CIQ_SIM_PORT / CIQ_SIM_PROC / runner format
-        # Runs on its OWN display :98 with a trap that reaps its Xvfb + sim, so it
-        # can never leak a server into the run step's :99 / sim port. Once the
-        # values below are pinned from this output, this step (and the tool
-        # fallback) are removed and the parser patterns are anchored exactly.
-        run: |
-          set -eux
-          echo "== tester.sh (how the image launches the sim) =="
-          cat /connectiq/bin/tester.sh || true
-          export DISPLAY=:98
-          Xvfb :98 -screen 0 1280x1024x24 >/dev/null 2>&1 &
-          XPID=$!
-          trap 'pkill -f "onnect|imulator" 2>/dev/null || true; kill "$XPID" 2>/dev/null || true' EXIT
-          sleep 3
-          connectiq >/dev/null 2>&1 &
-          sleep 15
-          echo "== listening ports (pin CIQ_SIM_PORT) =="
-          ss -ltnp || true
-          echo "== sim processes (pin CIQ_SIM_PROC) =="
-          pgrep -af 'onnect|imulator' || true
       - name: Compile --unit-test (edge1050)
         run: |
           set -eux
