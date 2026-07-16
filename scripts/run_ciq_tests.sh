@@ -18,9 +18,30 @@ PRG="${1:?usage: run_ciq_tests.sh <test.prg> <device>}"
 DEVICE="${2:?usage: run_ciq_tests.sh <test.prg> <device>}"
 SIM_PORT="${CIQ_SIM_PORT:-1234}"        # PINNED from `ss -ltnp` (DIAGNOSTIC run)
 SIM_PROC="${CIQ_SIM_PROC:-simulator}"   # PINNED real-sim process name (DIAGNOSTIC)
-RUN_TIMEOUT="${CIQ_RUN_TIMEOUT:-180}"   # monkeydo can NEVER outrun this
+RUN_TIMEOUT="${CIQ_RUN_TIMEOUT:-90}"    # monkeydo can NEVER outrun this
 DNUM="${CIQ_DISPLAY:-99}"
 LOG="sim-run.log"
+
+# The SIMULATOR loads device definitions from $HOME/.Garmin/ConnectIQ/Devices.
+# In a GitHub Actions container HOME=/github/home, but the image downloaded the
+# sim device defs under a DIFFERENT home at build time -- so the sim logged
+# "Failed to load .../Devices/edge1050/compiler.json" and monkeydo then hung
+# forever waiting for an app that could not start (PR #43 run 28; monkeyc
+# compiles fine because it reads the SDK's own device defs, not these). Point
+# HOME at wherever the sim device defs actually live so the sim can load
+# "$DEVICE". Search the likely homes first, then fall back to a full scan.
+if [ ! -e "$HOME/.Garmin/ConnectIQ/Devices/${DEVICE}/compiler.json" ]; then
+  cj="$(find /root /home /github /connectiq -maxdepth 8 -name compiler.json \
+          -path '*/.Garmin/ConnectIQ/Devices/*' 2>/dev/null | head -1)"
+  [ -n "$cj" ] || cj="$(find / -maxdepth 9 -name compiler.json \
+          -path '*/.Garmin/ConnectIQ/Devices/*' 2>/dev/null | head -1)"
+  if [ -n "$cj" ]; then
+    export HOME="${cj%/.Garmin/ConnectIQ/Devices/*}"
+    echo "note: sim HOME set to $HOME (device defs found at ${cj%/*/compiler.json})"
+  else
+    echo "::warning::no ConnectIQ sim device defs found on the image; the run will fail"
+  fi
+fi
 
 # True iff something is LISTENing on $SIM_PORT (ground truth, as captured by the
 # diagnostic). ss is guaranteed present (the job installs iproute2). The filter
@@ -90,14 +111,6 @@ if [ "$ready" != 1 ]; then
   echo "== pgrep -af 'onnect|imulator' =="; pgrep -af 'onnect|imulator' || true
   exit 1
 fi
-
-# DIAGNOSTIC (one-time): PR #43 run 27 showed monkeydo produce ZERO output and
-# hang the full timeout even with the sim up on :1234. Print the monkeydo wrapper
-# so we can see how it actually drives the sim (connect vs launch, which port,
-# whether it waits on the app to exit).
-echo "===== monkeydo wrapper (/connectiq/bin/monkeydo) ====="
-cat /connectiq/bin/monkeydo 2>/dev/null || echo "(not found / not readable)"
-echo "===== END monkeydo wrapper ====="
 
 # Run the test suite. stdbuf -oL/-eL keeps output line-buffered so partial
 # results survive the KILL if monkeydo is still buffering when the timeout fires.
