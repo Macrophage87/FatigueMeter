@@ -124,6 +124,11 @@ module Constants {
     const DFA_BOX_MIN = 4;         // box sizes 4..16 beats
     const DFA_BOX_MAX = 16;
     const DFA_R2_GATE = 0.75;      // calibration sigmoid fit acceptance (§10)
+    // Plausible α1 OUTPUT band (#15): a finite DFA α1 outside this range is a
+    // short/noisy-window artifact, not a real reading, so DfaAlpha1.compute drops
+    // it to the invalid sentinel instead of feeding an impossible value forward.
+    const ALPHA1_PLAUSIBLE_MIN = 0.2;   // below -> uncorrelated noise / artifact
+    const ALPHA1_PLAUSIBLE_MAX = 1.7;   // above -> impossible (correlated ceiling ~1.5 + headroom)
     const RR_STALE_S = 10;         // no fresh RR for this long -> α1 unavailable (§8.4 staleness timer)
 
     // ---- Decoupling / steadiness gate (white paper §3.1) ----

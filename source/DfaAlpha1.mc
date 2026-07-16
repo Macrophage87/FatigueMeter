@@ -17,6 +17,7 @@ module DfaAlpha1 {
     //! median of its neighbourhood by more than `tolFrac`. Ectopic beats and
     //! dropped RR both show up here. Returns 0..100.
     function artifactPercent(rr, tolFrac) {
+        if (rr == null) { return 100.0; }   // no buffer -> maximally untrusted (#15)
         var n = rr.size();
         if (n < 5) { return 100.0; }   // too few beats to trust
         var flagged = 0;
@@ -64,6 +65,11 @@ module DfaAlpha1 {
     //! r2 is the fit quality of log F(n) vs log n — used for the calibration gate
     //! and as a validity signal.
     function compute(rr, boxMin, boxMax) {
+        if (rr == null) { return [0.0, 0.0, 0]; }                    // RR-dropout path (#15)
+        // boxMin < 1 would divide by zero at `boxes = N / n` below (the loop's
+        // own `boxes < 1` break fires only AFTER the division); boxMax < boxMin is
+        // a degenerate/empty range. Guard both before any arithmetic (#15).
+        if (boxMin < 1 || boxMax < boxMin) { return [0.0, 0.0, 0]; }
         var N = rr.size();
         if (N < boxMax * 2) { return [0.0, 0.0, 0]; }   // need at least 2 largest boxes
 
@@ -122,8 +128,17 @@ module DfaAlpha1 {
         if (logN.size() < 2) { return [0.0, 0.0, 0]; }
         var res = MathUtil.olsSlopeR2(logN, logF);
         var alpha = res[0];
-        // α1 is bounded in practice to ~[0.2, 1.7]; scrub anything degenerate.
+        // α1 is bounded in practice to [ALPHA1_PLAUSIBLE_MIN, ALPHA1_PLAUSIBLE_MAX].
+        // A finite-but-implausible slope (short/noisy window, too few valid box
+        // sizes) is DROPPED, not trusted: the caller (PrimitivesCalculator
+        // .alpha1Metric) gates on `alpha <= 0.0`, so returning the invalid sentinel
+        // greys the tile instead of feeding a physiologically-impossible α1 into
+        // the validity / calibration logic. Clamping would smuggle a fake-valid
+        // value past that gate, so we reject rather than clamp (#15).
         if (!MathUtil.isFinite(alpha)) { return [0.0, 0.0, 0]; }
+        if (alpha < Constants.ALPHA1_PLAUSIBLE_MIN || alpha > Constants.ALPHA1_PLAUSIBLE_MAX) {
+            return [0.0, 0.0, 0];
+        }
         return [alpha, res[1], logN.size()];
     }
 
@@ -133,6 +148,7 @@ module DfaAlpha1 {
     //! duration. This is a proxy, not a validated fB — good enough to detect
     //! *rapid change* in breathing rate for R_A1 inflation (§4.4).
     function estimateFb(rr) {
+        if (rr == null) { return 0.0; }     // no buffer -> no fB estimate (#15)
         var n = rr.size();
         if (n < 8) { return 0.0; }
         // remove slow trend with a short moving average, then count sign changes

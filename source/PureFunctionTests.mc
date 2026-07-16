@@ -136,7 +136,10 @@ module PureFunctionTests {
 
     (:test)
     function testDfaOnCorrelatedSeries(logger) {
-        // a smooth (correlated) RR series should give α1 well above 0.5
+        // a smooth (correlated) RR series should give α1 well above 0.5.
+        // REGRESSION CONTROL for the #15 [0.2,1.7] gate: this series computes to
+        // α1 ≈ 0.582, safely INSIDE the band, so the new plausibility gate does
+        // NOT reject it (res[0] stays > 0.5, not the 0.0 sentinel).
         var rr = [];
         var base = 900.0;
         for (var i = 0; i < 200; i++) {
@@ -145,6 +148,56 @@ module PureFunctionTests {
         }
         var res = DfaAlpha1.compute(rr, 4, 16);
         return res[0] > 0.5 && MathUtil.isFinite(res[0]);
+    }
+
+    (:test)
+    function testDfaNullRrIsSafe(logger) {
+        // #15: a null buffer (the RR-dropout path) must return safe per-function
+        // sentinels, never throw on rr.size().
+        var res = DfaAlpha1.compute(null, 4, 16);
+        var art = DfaAlpha1.artifactPercent(null, 0.25);
+        var fb  = DfaAlpha1.estimateFb(null);
+        var okRes = (res[0] == 0.0) && (res[2] == 0);
+        var okArt = near(art, 100.0, 0.001);
+        var okFb  = near(fb, 0.0, 0.001);
+        return okRes && okArt && okFb;
+    }
+
+    (:test)
+    function testDfaBadBoxSizesAreSafe(logger) {
+        // #15: boxMin == 0 must not divide by zero (boxes = N/n); boxMax < boxMin
+        // (inverted range) must short-circuit. Both -> invalid sentinel.
+        var rr = [];
+        for (var i = 0; i < 200; i++) { rr.add(900.0 + (i % 5)); }
+        var zero     = DfaAlpha1.compute(rr, 0, 16);   // was N/0
+        var inverted = DfaAlpha1.compute(rr, 16, 4);
+        var okZero = (zero[0] == 0.0) && (zero[2] == 0);
+        var okInv  = (inverted[0] == 0.0) && (inverted[2] == 0);
+        return okZero && okInv;
+    }
+
+    (:test)
+    function testDfaAlpha1RejectsHighImplausible(logger) {
+        // #15: a pure linear ramp rr[i] = 800 + i integrates to a quadratic, so
+        // DFA α1 ≈ 2.1 -- ABOVE ALPHA1_PLAUSIBLE_MAX (1.7). N=200 >= boxMax*2 so
+        // compute runs the real algorithm and reaches the plausibility gate, which
+        // must DROP the impossible slope to the invalid sentinel (not vacuous:
+        // rejection comes from the α1 gate, not the N/box guards).
+        var rr = [];
+        for (var i = 0; i < 200; i++) { rr.add(800.0 + i); }
+        var res = DfaAlpha1.compute(rr, 4, 16);
+        return res[0] == 0.0 && res[2] == 0;
+    }
+
+    (:test)
+    function testDfaAlpha1RejectsLowImplausible(logger) {
+        // #15: a period-2 alternating series (850/950) is strongly anti-correlated,
+        // so DFA α1 ≈ 0.05 -- BELOW ALPHA1_PLAUSIBLE_MIN (0.2). compute must DROP it
+        // to the invalid sentinel.
+        var rr = [];
+        for (var i = 0; i < 200; i++) { rr.add((i % 2 == 0) ? 850.0 : 950.0); }
+        var res = DfaAlpha1.compute(rr, 4, 16);
+        return res[0] == 0.0 && res[2] == 0;
     }
 
     (:test)
