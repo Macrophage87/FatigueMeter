@@ -154,6 +154,16 @@ class FatigueMeterView extends WatchUi.DataField {
         }
     }
 
+    //! Release the raw ANT+ HRM channel at ride end (#47). Null-guarded (ant is
+    //! null when Ant was unavailable) + try/catch. Called from App.onStop --
+    //! deliberately NOT onHide, which fires on mid-ride data-screen paging and
+    //! would tear down the strap / drop RR continuity.
+    function releaseAnt() {
+        try {
+            if (ant != null) { ant.stop(); }
+        } catch (e) { }
+    }
+
     //! Beat-to-beat RR callback. Buffers intervals for the next compute(); guarded
     //! so a malformed packet never disturbs the compute loop.
     function onSensorData(sensorData as Toybox.Sensor.SensorData) as Void {

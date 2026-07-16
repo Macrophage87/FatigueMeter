@@ -24,6 +24,7 @@ class AntHrm extends Ant.GenericChannel {
     hidden const RF_FREQ     = 57;     // 2457 MHz (ANT+)
 
     hidden var opened;
+    hidden var closing;         // true while deliberately releasing -> suppress auto-reopen (#47)
     hidden var rr;              // buffered RR intervals (ms) since last drain
     hidden var havePrev;
     hidden var prevTime;        // last heart-beat event time (1/1024 s)
@@ -39,6 +40,7 @@ class AntHrm extends Ant.GenericChannel {
         prevCount = 0;
         lastHr = 0;
         opened = false;
+        closing = false;
 
         var cfg = new Ant.DeviceConfig({
             :deviceNumber => 0,                 // wildcard: pair with any HRM
@@ -54,11 +56,15 @@ class AntHrm extends Ant.GenericChannel {
 
     //! Open the channel. Returns true on success. Never throws to the caller.
     function start() {
+        closing = false;                 // a fresh open cancels any prior teardown intent
         try { opened = GenericChannel.open(); } catch (e) { opened = false; }
         return opened;
     }
 
+    //! Release the channel at ride end (#47). GenericChannel.release() is an
+    //! Ant-namespace API and IS legal in a Data Field (unlike the Sensor API).
     function stop() {
+        closing = true;                  // set BEFORE release so its close event is ignored
         try { GenericChannel.release(); } catch (e) { }
         opened = false;
     }
@@ -85,7 +91,9 @@ class AntHrm extends Ant.GenericChannel {
             } else if (id == Ant.MSG_ID_CHANNEL_RESPONSE_EVENT) {
                 var p = msg.getPayload();
                 if (p != null && p.size() >= 2 && p[1] == Ant.MSG_CODE_EVENT_CHANNEL_CLOSED) {
-                    try { GenericChannel.open(); } catch (e) { }
+                    // Self-heal a dropout by re-opening -- but NOT during a
+                    // deliberate release() (that also raises this close event). (#47)
+                    if (!closing) { try { GenericChannel.open(); } catch (e) { } }
                 }
             }
         } catch (e) { }
