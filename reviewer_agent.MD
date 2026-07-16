@@ -41,6 +41,17 @@ Whenever the maintainer says "review" (a PR or an issue proposal):
    - **Accept** → state whether any small changes are still needed.
 5. Verify load-bearing reviewer claims independently before relying on them.
 
+**A review is not complete until the per-agent summaries and the single overall
+verdict are posted to the actual PR/issue on GitHub.** Collecting the votes is not
+the deliverable; the posted comment is. Do not consider the task done until that
+comment exists.
+
+**Reviewing never includes merging, closing, or pushing.** The review protocol
+terminates at posting the verdict. Merging a PR, closing an issue, and pushing
+commits are separate gate actions — taken only when the maintainer explicitly
+directs them (see "Role" above), never as an implicit part of "review." A verdict
+of Accept is a recommendation, not authorization to merge or close.
+
 ## Issue triage — priority labels
 
 Every GitHub issue must carry a `Priority:` label matching the severity in its
