@@ -63,7 +63,15 @@ class AcuteFatigueFilter {
         lastPower = 0.0;
     }
 
-    function setConfig(config) { cfg = config; }
+    function setConfig(config) {
+        cfg = config;
+        // §4.3a: A depends on tauHr/tauA/tauRec/cF, so a mid-ride settings reload
+        // changes the observability Gramian. Recompute so isFObservable()/
+        // observabilityDetGram() track the gains step() is actually using (#23).
+        // Guarded on `initialized`: obs is meaningful only for a stepping filter;
+        // initState() runs computeObservability() on the first step regardless.
+        if (initialized) { computeObservability(); }
+    }
 
     //! Seed F(0) from the Layer-3 residual state at ride start (§7). The athlete
     //! starts partly fatigued when carrying load.
@@ -193,6 +201,13 @@ class AcuteFatigueFilter {
 
         var powerOk = (power != null && power >= 0 && MathUtil.isFinite(power));
         var p = powerOk ? power.toFloat() : lastKnownPower();
+        // Reject a spurious-but-FINITE high spike (a 65535-style sensor glitch
+        // passes powerOk) before it enters u: otherwise one bad sample saturates
+        // F to 3*fRef and pins AFI to 100 for that step, which the caller latches
+        // into peakAfi for the whole ride (#23). The clamp sits AFTER the
+        // lastKnownPower() fallback, so a glitch reused during a dropout is bounded
+        // on every consuming step too.
+        p = MathUtil.clamp(p, 0.0, Constants.POWER_SANITY_MAX);
         if (powerOk) { lastPower = power.toFloat(); }
         priorDominated = stationary;   // steady power -> F is prior-dominated (§4.3a)
 
@@ -259,6 +274,22 @@ class AcuteFatigueFilter {
             if (!MathUtil.isFinite(x[S_F]))    { x[S_F]    = MathUtil.clamp(seedF, 0.0, cfg.fRef); }
             degraded = true;
         }
+
+        // Bound the latent HR states to a plausible range (#23). Placed AFTER the
+        // non-finite self-heal block on purpose: that block must still SEE a
+        // non-finite x[S_HR]/x[S_HRSS] to latch `degraded` and scrub to the safe
+        // seed (the #8 reset-branch contract). These clamps then bound a
+        // finite-but-implausible value the finite check cannot catch -- e.g. a
+        // latent-HR runaway drifting toward hrSsInput through a long HR dropout.
+        // MathUtil.clamp returns lo on NaN, so they stay NaN-safe regardless.
+        // x[S_HR] is measurement-mapped (H_hr picks index 1) -> a plausible-HR
+        // band; a genuine max effort never exceeds hrMax by more than the margin.
+        x[S_HR] = MathUtil.clamp(x[S_HR], Constants.HR_STATE_MIN, cfg.hrMax + Constants.HR_STATE_MARGIN);
+        // x[S_HRSS] is the deterministic steady-state asymptote hrRest + gP*p (NOT
+        // a measured HR), which legitimately runs to several hundred at high power;
+        // bound it to exactly the max the CLAMPED power can drive so normal hard
+        // efforts are never clipped, while clamp() still scrubs any NaN to 0.
+        x[S_HRSS] = MathUtil.clamp(x[S_HRSS], 0.0, cfg.hrRest + cfg.gP * Constants.POWER_SANITY_MAX);
     }
 
     //! Inflate R_A1 when respiration changes rapidly or artifact is elevated
