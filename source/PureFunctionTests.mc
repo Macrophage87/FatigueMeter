@@ -617,4 +617,21 @@ module PureFunctionTests {
         m.value = inf - inf;                          // NaN injected past the ctor
         return !m.isUsable() && !m.isPresent();
     }
+
+    (:test)
+    function testViewDefaultSnapshotIsConservative(logger) {
+        // #13: when View construction fails, the field must degrade to a SAFE,
+        // HONEST NODATA snapshot -- numeric AFI LOCKED, "uncalibrated" tag, NODATA
+        // status, max uncertainty -- never over-claiming. Lock those values (the
+        // control flow itself isn't off-device testable; the defaults are).
+        var s = FatigueMeterView.defaultSnapshot();
+        return s[:status] == DescriptiveStrings.STATUS_NODATA
+            && s[:numericUnlocked] == false
+            && s[:calibrated] == false
+            && s[:afi] == null
+            && near(s[:afiUnc], 100.0, 1e-9)
+            && s[:priorDominated] == true
+            && s[:powerAvail] == false
+            && s[:stationary] == false;
+    }
 }

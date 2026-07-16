@@ -30,6 +30,7 @@ class FatigueMeterView extends WatchUi.DataField {
     // ride-summary accumulators
     hidden var peakAfi;
     hidden var lastFreshMatchCount;
+    hidden var ready;          // true only after every collaborator built OK (§8.4, #13)
 
     // display snapshot (written by compute, read by onUpdate)
     hidden var dStatus;
@@ -52,16 +53,34 @@ class FatigueMeterView extends WatchUi.DataField {
     hidden var dPowerAvail;
     hidden var dStationary;
 
+    //! Conservative NODATA defaults written at construction BEFORE the guarded
+    //! collaborator build (§8.4, #13): if that build throws, the field is left on
+    //! this safe, HONEST snapshot -- numeric AFI LOCKED, "uncalibrated" tag, NODATA
+    //! status, max uncertainty -- so a construction fault never over-claims. Static
+    //! + pure so these values can be unit-tested (a DataField subclass cannot be
+    //! instantiated off-device, but a static helper can).
+    static function defaultSnapshot() {
+        return {
+            :status          => DescriptiveStrings.STATUS_NODATA,
+            :afi             => null,
+            :afiUnc          => 100.0,   // max uncertainty
+            :numericUnlocked => false,   // numeric AFI stays LOCKED until a clean build
+            :calibrated      => false,   // show the "uncalibrated" tag until proven
+            :priorDominated  => true,
+            :powerAvail      => false,
+            :stationary      => false
+        };
+    }
+
     function initialize() {
         DataField.initialize();
-        cfg = new Config();
-        prims = new PrimitivesCalculator(cfg);
-        filter = new AcuteFatigueFilter(cfg);
-        effort = new EffortCharacterizer(cfg);
-        ledger = new TrainingLoadLedger(cfg);
-        sessions = new SessionStore();
-        fit = new FitLogger(self);
+        ready = false;
 
+        // Renderable NODATA snapshot FIRST: onUpdate()/compute() must have a
+        // complete, safe state to read even if the guarded construction below
+        // fails partway (§8.4 -- a construction fault greys the field, it must NOT
+        // brick it to the Connect IQ banner). Defaults are conservative: numeric
+        // AFI locked and the "uncalibrated" tag, until a clean build proves otherwise.
         pendingRr = [];
         tick = 0;
         seeded = false;
@@ -69,26 +88,49 @@ class FatigueMeterView extends WatchUi.DataField {
         peakAfi = 0.0;
         lastFreshMatchCount = 0;
 
-        dStatus = { :status => DescriptiveStrings.STATUS_NODATA, :redKind => "none",
+        var snap = defaultSnapshot();
+        dStatus = { :status => snap[:status], :redKind => "none",
                     :advisoryActive => false, :alpha1Gated => true, :decoupOnly => true };
-        dAfi = null; dAfiUnc = 100.0;
+        dAfi = snap[:afi]; dAfiUnc = snap[:afiUnc];
         dDecoup = Signals.Metric.unavailable("--");
         dAlpha1 = Signals.Metric.unavailable("no RR");
         dArtifact = null;
         dKjw = 0.0; dKjTotal = 0.0; dWmatches = 0;
         dBest1 = 0.0; dBest5 = 0.0; dBest20 = 0.0;
-        dNumericUnlocked = cfg.numericAfiUnlocked();
-        dCalibrated = CalibrationFit.isCalibrated();
+        dNumericUnlocked = snap[:numericUnlocked];   // conservative: numeric AFI LOCKED
+        dCalibrated = snap[:calibrated];             // conservative: "uncalibrated" tag
         dSourceSwitched = false;
-        dPriorDominated = true;
+        dPriorDominated = snap[:priorDominated];
         dRedKind = "none";
-        dPowerAvail = false;
-        dStationary = false;
+        dPowerAvail = snap[:powerAvail];
+        dStationary = snap[:stationary];
+
+        // Guarded construction (mirrors registerSensors()): a corrupt/legacy
+        // property that makes any collaborator ctor or a Storage/Properties read
+        // throw must not fail the whole DataField to the CIQ banner. Monkey C
+        // fails forward, so a SINGLE `ready` flag -- flipped true only when every
+        // collaborator built -- gates the hot paths, rather than fragile per-field
+        // null checks that would miss effort/ledger/sessions/fit.
+        try {
+            cfg = new Config();
+            prims = new PrimitivesCalculator(cfg);
+            filter = new AcuteFatigueFilter(cfg);
+            effort = new EffortCharacterizer(cfg);
+            ledger = new TrainingLoadLedger(cfg);
+            sessions = new SessionStore();
+            fit = new FitLogger(self);
+            dNumericUnlocked = cfg.numericAfiUnlocked();
+            dCalibrated = CalibrationFit.isCalibrated();
+            ready = true;
+        } catch (e) {
+            ready = false;   // any collaborator may be null -> stay on NODATA snapshot
+        }
 
         registerSensors();
     }
 
     function onSettingsChanged() {
+        if (!ready) { return; }   // construction failed -> guarded no-op
         cfg.reload();
         prims.setConfig(cfg);
         filter.setConfig(cfg);
@@ -145,6 +187,7 @@ class FatigueMeterView extends WatchUi.DataField {
     }
 
     hidden function computeInner(info) {
+        if (!ready) { return; }   // construction failed -> stay on the NODATA snapshot
         tick++;
 
         var power = (info != null) ? sanitize(info.currentPower) : null;
@@ -266,7 +309,7 @@ class FatigueMeterView extends WatchUi.DataField {
     // =====================================================================
 
     function finalizeSession() {
-        if (finalized) { return; }
+        if (!ready || finalized) { return; }   // no collaborators to finalize if init failed
         finalized = true;
 
         // Ride-induced cardiovascular drift (acute F from a NEUTRAL start) and ride
