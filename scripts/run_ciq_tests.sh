@@ -74,7 +74,7 @@ done
 # up and monkeydo connected but then hung to the timeout (PR #43 run 26), so we
 # mirror the proven invocation. Liveness is still checked by process NAME. Give a
 # startup grace so the pgrep-death check cannot false-fail during launch.
-simulator >/dev/null 2>&1 &
+simulator >sim-sim.log 2>&1 &
 sleep 5
 
 ready=0
@@ -91,17 +91,32 @@ if [ "$ready" != 1 ]; then
   exit 1
 fi
 
+# DIAGNOSTIC (one-time): PR #43 run 27 showed monkeydo produce ZERO output and
+# hang the full timeout even with the sim up on :1234. Print the monkeydo wrapper
+# so we can see how it actually drives the sim (connect vs launch, which port,
+# whether it waits on the app to exit).
+echo "===== monkeydo wrapper (/connectiq/bin/monkeydo) ====="
+cat /connectiq/bin/monkeydo 2>/dev/null || echo "(not found / not readable)"
+echo "===== END monkeydo wrapper ====="
+
+# Run the test suite. stdbuf -oL/-eL keeps output line-buffered so partial
+# results survive the KILL if monkeydo is still buffering when the timeout fires.
 set +e
-timeout --signal=KILL "${RUN_TIMEOUT}" monkeydo "$PRG" "$DEVICE" -t >"$LOG" 2>&1
+stdbuf -oL -eL timeout --signal=KILL "${RUN_TIMEOUT}" monkeydo "$PRG" "$DEVICE" -t >"$LOG" 2>&1
 rc=$?
 set -e
 
-# ALWAYS echo the captured output into the job log so its exact format is
-# readable via the Actions API even when the artifact blob download is blocked;
-# it is also what the parser patterns get pinned from.
+# ALWAYS echo the captured output so its exact format is readable via the Actions
+# API even when the artifact blob download is blocked; it is also what the parser
+# patterns get pinned from.
 echo "===== BEGIN sim-run.log (monkeydo output) ====="
 cat "$LOG" || true
 echo "===== END sim-run.log ====="
+# The simulator's own stdout/stderr often carries the 'Run No Evil' results (and
+# any app load/crash diagnostics) when monkeydo itself prints nothing.
+echo "===== BEGIN simulator output (sim-sim.log, last 80 lines) ====="
+tail -80 sim-sim.log 2>/dev/null || true
+echo "===== END simulator output ====="
 
 if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
   echo "::error::monkeydo timed out after ${RUN_TIMEOUT}s"; exit 1
