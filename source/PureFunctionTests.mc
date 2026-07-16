@@ -201,6 +201,38 @@ module PureFunctionTests {
     }
 
     (:test)
+    function testCalibrationRejectsOutOfRangeCrossing(logger) {
+        // #12: a well-correlated falling α1 whose 0.75 crossing lands FAR outside
+        // the sampled power range must be REJECTED (not accepted with an absurd
+        // pAeT). alphas = 0.95 - 0.0002*(P-100) over [100,240] -> the 0.75 crossing
+        // sits at ~1100 W. Pre-fix: accepted with pAeT~1100; post-fix: rejected,
+        // pAeT clamped into range. This is the *reachable* form of the #12 defect.
+        var powers = [100.0, 120.0, 140.0, 160.0, 180.0, 200.0, 220.0, 240.0];
+        var alphas = [];
+        for (var i = 0; i < powers.size(); i++) {
+            alphas.add(0.95 - 0.0002 * (powers[i] - 100.0));
+        }
+        var fit = CalibrationFit.fitSigmoid(powers, alphas);
+        var okReject = (fit["accepted"] == false);
+        var okClamp = (fit["pAeT"] >= 100.0) && (fit["pAeT"] <= 240.0);
+        return okReject && okClamp;
+    }
+
+    (:test)
+    function testCalibrationValidatesAlphas(logger) {
+        // #12: valid powers + short/null alphas must reject cleanly, never throw
+        // in olsSlopeR2/mean (which have no null/length front-guard). Pre-fix threw
+        // out-of-bounds; post-fix returns the clean {accepted:false, r2:0} sentinel.
+        var powers = [100.0, 120.0, 140.0, 160.0, 180.0, 200.0, 220.0, 240.0];
+        var shortAlphas = [1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4];   // size 7 != 8
+        var mismatched = CalibrationFit.fitSigmoid(powers, shortAlphas);
+        var nullAlphas = CalibrationFit.fitSigmoid(powers, null);
+        var okMis  = (mismatched["accepted"] == false) && near(mismatched["r2"], 0.0, 1e-9);
+        var okNull = (nullAlphas["accepted"] == false) && near(nullAlphas["r2"], 0.0, 1e-9);
+        return okMis && okNull;
+    }
+
+    (:test)
     function testRrStalenessMarksAlpha1Unavailable(logger) {
         // §8.4 staleness timer: with fresh RR, α1 is usable; once RR has been
         // silent for > RR_STALE_S the α1 tile must go UNAVAILABLE (not keep
