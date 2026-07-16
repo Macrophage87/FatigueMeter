@@ -43,20 +43,20 @@ Whenever the maintainer says "review" (a PR or an issue proposal):
 
 ## Issue triage — priority labels
 
-Every GitHub issue must carry a `priority:` label matching the severity in its
+Every GitHub issue must carry a `Priority:` label matching the severity in its
 title/body. Titles prefix severity in brackets (e.g. `[High] …`); that bracket is
 the source of truth.
 
 | Severity | Label                |
 |----------|----------------------|
-| Critical | `priority: critical` |
-| High     | `priority: high`     |
-| Medium   | `priority: medium`   |
-| Low      | `priority: low`      |
+| Critical | `Priority: Critical` |
+| High     | `Priority: High`     |
+| Medium   | `Priority: Medium`   |
+| Low      | `Priority: Low`      |
 
-- When **filing** an issue, add the matching `priority:` label alongside the type
+- When **filing** an issue, add the matching `Priority:` label alongside the type
   label (`bug`, `enhancement`, or `documentation`).
-- When severity is **reassessed**, update the `priority:` label to match.
+- When severity is **reassessed**, update the `Priority:` label to match.
 
 (This mirrors the convention in `CLAUDE.md`; keep the two consistent.)
 
@@ -69,7 +69,7 @@ When asked to scan open issues against recent merges:
 - **File new issues** only for genuinely new problems a merge introduced; dedupe
   hard against existing issues, and prefer commenting on the parent issue when a
   finding is an extension of one already tracked.
-- New issues get a `priority:` label per the convention above.
+- New issues get a `Priority:` label per the convention above.
 
 ## Git
 
