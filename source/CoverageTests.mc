@@ -250,6 +250,63 @@ module CoverageTests {
         return okSlope && okR2;
     }
 
+    // ---- olsSlopeR2 / mean / stdev never-throws contract (#27) ----
+    (:test)
+    function testOlsSlopeR2NullInputs(logger) {
+        // #27: a null xs or ys must return the [0,0] sentinel, never throw on .size().
+        var a = MathUtil.olsSlopeR2(null, [1.0, 2.0]);
+        var b = MathUtil.olsSlopeR2([1.0, 2.0], null);
+        var okA = near(a[0], 0.0, 1e-9) && near(a[1], 0.0, 1e-9);
+        var okB = near(b[0], 0.0, 1e-9) && near(b[1], 0.0, 1e-9);
+        return okA && okB;
+    }
+
+    (:test)
+    function testOlsSlopeR2MismatchedLengths(logger) {
+        // #27: ys shorter than xs must NOT throw out-of-bounds -> [0,0].
+        var r = MathUtil.olsSlopeR2([0.0, 1.0, 2.0, 3.0], [0.0, 1.0]);
+        return near(r[0], 0.0, 1e-9) && near(r[1], 0.0, 1e-9);
+    }
+
+    (:test)
+    function testOlsSlopeR2PerfectLine(logger) {
+        // #27 happy-path regression: y = 2x + 1 -> slope 2, r2 1 (guard is a no-op).
+        var r = MathUtil.olsSlopeR2([0.0, 1.0, 2.0, 3.0, 4.0],
+                                    [1.0, 3.0, 5.0, 7.0, 9.0]);
+        return near(r[0], 2.0, 1e-6) && near(r[1], 1.0, 1e-6);
+    }
+
+    (:test)
+    function testOlsSlopeR2NonFiniteSlopeGuarded(logger) {
+        // #27: exercises the isFinite(slope) branch the null/length tests don't.
+        // x*x with x ~ 1e20 overflows Float (~1e40 > max) AT RUNTIME, so the slope
+        // computes non-finite; the guard must return [0,0] instead of leaking
+        // Inf/NaN. Inputs are IN-range literals (< Float max), so there is no #9
+        // constant-folder hazard -- the overflow happens inside the sum, not in a
+        // literal. (Deleting the `if (!isFinite(slope))` line would fail THIS test.)
+        var big = [1.0e20, 2.0e20, 3.0e20];
+        var r = MathUtil.olsSlopeR2(big, big);
+        return near(r[0], 0.0, 1e-9) && near(r[1], 0.0, 1e-9);
+    }
+
+    (:test)
+    function testMeanSkipsNullElements(logger) {
+        // #27: a null hole must not throw; mean is over the present values -> (2+4)/2.
+        return near(MathUtil.mean([2.0, null, 4.0]), 3.0, 1e-9);
+    }
+
+    (:test)
+    function testMeanAllNullIsZero(logger) {
+        // #27: all-null array -> 0.0, never divide by zero.
+        return near(MathUtil.mean([null, null]), 0.0, 1e-9);
+    }
+
+    (:test)
+    function testStdevSkipsNullElements(logger) {
+        // #27: sample stdev of {2,4} (null skipped) = sqrt(2) ~ 1.41421.
+        return near(MathUtil.stdev([2.0, null, 4.0]), 1.4142135, 1e-5);
+    }
+
     (:test)
     function testFallingSigmoidClampsExpOverflow(logger) {
         // far below P_AeT the exponent saturates -> ~a0; far above -> ~a0-a1; both

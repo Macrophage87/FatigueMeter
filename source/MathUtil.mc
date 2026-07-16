@@ -36,8 +36,15 @@ module MathUtil {
     function mean(arr) {
         if (arr == null || arr.size() == 0) { return 0.0; }
         var s = 0.0;
-        for (var i = 0; i < arr.size(); i++) { s += arr[i]; }
-        return s / arr.size();
+        var n = 0;
+        for (var i = 0; i < arr.size(); i++) {
+            var v = arr[i];
+            if (v == null) { continue; }   // skip holes -> true mean over present values (#27)
+            s += v;
+            n++;
+        }
+        if (n == 0) { return 0.0; }        // all-null -> 0, never divide by zero
+        return s / n;
     }
 
     //! Sample standard deviation (N-1). Returns 0 for <2 samples.
@@ -45,11 +52,16 @@ module MathUtil {
         if (arr == null || arr.size() < 2) { return 0.0; }
         var m = mean(arr);
         var s = 0.0;
+        var n = 0;
         for (var i = 0; i < arr.size(); i++) {
-            var d = arr[i] - m;
+            var v = arr[i];
+            if (v == null) { continue; }   // skip holes, consistent with mean() (#27)
+            var d = v - m;
             s += d * d;
+            n++;
         }
-        return Math.sqrt(s / (arr.size() - 1));
+        if (n < 2) { return 0.0; }         // <2 present values -> 0 (N-1 over present count)
+        return Math.sqrt(s / (n - 1));
     }
 
     //! Coefficient of variation = stdev/|mean|. 0 when mean ~0.
@@ -62,8 +74,16 @@ module MathUtil {
     //! Ordinary least-squares slope of y vs x (both arrays, equal length).
     //! Returns [slope, r2]. Used by DFA (log-log slope) and calibration fits.
     function olsSlopeR2(xs, ys) {
+        // Front-guard null / short / mismatched-length inputs so a bad window can't
+        // throw out of this helper's "never throws" contract (§8.4) -- defense in
+        // depth: the two live callers (DfaAlpha1.compute, CalibrationFit.fitSigmoid)
+        // already pre-guard their inputs (CalibrationFit's alphas null/length guard
+        // landed in #12), but this pure helper must be safe on its own (#27).
+        // Subsumes the old `n < 2` check.
+        if (xs == null || ys == null || xs.size() < 2 || xs.size() != ys.size()) {
+            return [0.0, 0.0];
+        }
         var n = xs.size();
-        if (n < 2) { return [0.0, 0.0]; }
         var sx = 0.0; var sy = 0.0; var sxx = 0.0; var sxy = 0.0; var syy = 0.0;
         for (var i = 0; i < n; i++) {
             var x = xs[i]; var y = ys[i];
@@ -72,6 +92,9 @@ module MathUtil {
         var denom = (n * sxx - sx * sx);
         if (denom > -1.0e-12 && denom < 1.0e-12) { return [0.0, 0.0]; }
         var slope = (n * sxy - sx * sy) / denom;
+        // A sxx/syy-overflow Inf/NaN slope must not leak past the never-throws
+        // contract into a caller's calibration math (#27); fail to the sentinel.
+        if (!isFinite(slope)) { return [0.0, 0.0]; }
         // r^2
         var num = (n * sxy - sx * sy);
         var d2 = (n * sxx - sx * sx) * (n * syy - sy * sy);
