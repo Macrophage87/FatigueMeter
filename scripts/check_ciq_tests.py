@@ -9,7 +9,7 @@ authoritative summary, e.g. a FAILING run:
     FAILED (passed=39, failed=2, errors=1)
 
 (that historical example predates the #45 fixes; the current suite self-computes
-to 47 (:test) functions and runs green 47/47), or a passing run
+to 105 (:test) functions and runs green 105/105), or a passing run
 `PASSED (passed=N, failed=0, errors=0)`, preceded by a RESULTS table whose rows
 read `<TestName>   PASS|FAIL|ERROR`.
 

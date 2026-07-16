@@ -14,6 +14,14 @@ class SessionStore {
     //! Session Result schema version. Bumped when buildResult's shape changes;
     //! read-side migrate()/isValidRecord() gate on it so a stale-shaped record is
     //! upgraded or dropped rather than trusted.
+    //!
+    //! CONTRACT — bumping SCHEMA to N REQUIRES adding a v(N-1)->vN upgrade step in
+    //! migrate() (and, for a multi-version jump, every intermediate step). isValidRecord
+    //! demands `_v == SCHEMA` EXACTLY, so any existing record migrate() does not
+    //! carry up to the new SCHEMA is silently dropped on the next load() — i.e. a
+    //! bump WITHOUT a matching migrate() step wipes the entire ride history. migrate()
+    //! today only stamps *unversioned* (pre-`_v`) records; it has no version-stepping
+    //! path yet, so SCHEMA must not be bumped until that path is added here.
     const SCHEMA = 1;
 
     hidden const KEY = "fm_sessions_v1";
@@ -91,10 +99,17 @@ class SessionStore {
     //! Upgrade a legacy record in place: an unversioned dictionary predates the
     //! "_v" stamp, so treat it as the current schema. Non-dictionaries pass
     //! through unchanged (isValidRecord will reject them).
+    //!
+    //! IMPORTANT (see the SCHEMA const contract): this only handles the
+    //! unversioned->current case. When SCHEMA is bumped, add explicit
+    //! v(n)->v(n+1) upgrade steps HERE for every prior version, otherwise
+    //! isValidRecord's exact `_v == SCHEMA` check drops every un-upgraded record
+    //! on the next load() and the whole history is lost.
     static function migrate(rec) {
         if (!(rec instanceof Lang.Dictionary)) { return rec; }
         var d = rec as Lang.Dictionary;
         if (!d.hasKey("_v")) { d.put("_v", SessionStore.SCHEMA); }
+        // (no v(n)->v(n+1) steps needed while SCHEMA == 1)
         return d;
     }
 

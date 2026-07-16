@@ -532,7 +532,14 @@ module CoverageTests {
         raw.add(null);                                        // null -> dropped
         raw.add({ "date" => 3 });                             // missing durationS -> dropped
         var clean = SessionStore.sanitize(raw);
-        return clean.size() == 2;
+        var okCount = (clean.size() == 2);
+        // Assert the RIGHT two survived in order (valid date=1, migrated date=2),
+        // not merely that two elements remain -- a bug that kept the wrong pair
+        // would still pass a bare size() check.
+        var r0 = clean[0] as Lang.Dictionary;
+        var r1 = clean[1] as Lang.Dictionary;
+        var okKept = (r0["date"] == 1) && (r1["date"] == 2);
+        return okCount && okKept;
     }
 
     (:test)
