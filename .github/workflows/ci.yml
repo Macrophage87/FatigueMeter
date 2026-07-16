@@ -91,33 +91,29 @@ jobs:
       # so we isolate the compile first. Running the unit tests via `monkeydo
       # bin/FatigueMeter-test.prg edge1050 -t` (needs xvfb) is a deliberate
       # follow-up once a clean compile is confirmed here.
-      - name: Diagnose monkeyc crash (version, wrapper, with/without --unit-test)
+      - name: Diagnose monkeyc --unit-test crash (device vs test-file split)
         run: |
-          # Do NOT fail-fast: run every probe and report each exit code so a
-          # single CI run pins which dimension (plain vs --unit-test vs -l)
-          # triggers the opaque "critical error" crash.
+          # Prior run proved: plain build OK, --unit-test crashes (level-independent),
+          # SDK 9.2.0. Now split the --unit-test crash two ways in one run:
+          #   D  = is it edge1050-specific? (try other devices; tests are pure
+          #        formulas, device-independent, so a clean device IS a fix path)
+          #   E  = is it the TEST FILE, or --unit-test instrumentation of the app?
+          #        (compile --unit-test with PureFunctionTests.mc removed)
           set +e
-          echo "===== which/monkeyc wrapper (find the underlying java -jar + any log/heap knob) ====="
-          which monkeyc
-          cat "$(which monkeyc)" 2>&1 || true
-          echo "===== SDK version ====="
-          monkeyc --version 2>&1 || true
-          echo "===== keys ====="
           if ! command -v openssl >/dev/null 2>&1; then apt-get update && apt-get install -y openssl; fi
           openssl genrsa -out developer_key.pem 4096 2>/dev/null
           openssl pkcs8 -topk8 -inform PEM -outform DER -in developer_key.pem -out developer_key.der -nocrypt
           mkdir -p bin
-          echo "===== PROBE A: plain build — owner's KNOWN-GOOD local command (NO --unit-test) ====="
-          monkeyc -f monkey.jungle -o bin/A.prg -y developer_key.der -d edge1050 2>&1
-          echo "PROBE_A_EXIT=$?"
-          echo "===== PROBE B: --unit-test (BUILD.md test command; the one that crashed) ====="
-          monkeyc -f monkey.jungle -o bin/B.prg -y developer_key.der -d edge1050 --unit-test 2>&1
-          echo "PROBE_B_EXIT=$?"
-          echo "===== PROBE C: --unit-test -l 0 (silent type-check) ====="
-          monkeyc -f monkey.jungle -o bin/C.prg -y developer_key.der -d edge1050 --unit-test -l 0 2>&1
-          echo "PROBE_C_EXIT=$?"
-          echo "===== any compiler logs written in the last few minutes ====="
-          find / -name '*.log' -newermt '-5 minutes' 2>/dev/null | head -20 || true
+          for dev in edge1050 fr965 fenix7x edge840; do
+            echo "===== PROBE D[$dev]: --unit-test -d $dev (full tree) ====="
+            monkeyc -f monkey.jungle -o "bin/D-$dev.prg" -y developer_key.der -d "$dev" --unit-test 2>&1
+            echo "PROBE_D_${dev}_EXIT=$?"
+          done
+          echo "===== PROBE E: --unit-test -d edge1050 with PureFunctionTests.mc REMOVED ====="
+          mv source/PureFunctionTests.mc /tmp/PureFunctionTests.mc.bak
+          monkeyc -f monkey.jungle -o bin/E.prg -y developer_key.der -d edge1050 --unit-test 2>&1
+          echo "PROBE_E_EXIT=$?"
+          mv /tmp/PureFunctionTests.mc.bak source/PureFunctionTests.mc
           echo "===== done ====="
           exit 0
 
