@@ -64,16 +64,23 @@ module PureFunctionTests {
         return near(tss, 100.0, 0.01);
     }
 
+    // NOTE (#14): testTsbIdentity / testEwmaFold below cover tsbFrom / ewmaFold,
+    // which are RETAINED validated pure math but sit on NO shipped code path --
+    // the field stopped folding cross-ride CTL/ATL/TSB on-device in Rev 5 (see the
+    // TrainingLoadLedger header and Constants.mc). They are kept (not deleted) as a
+    // guard on that retained library; this annotation keeps their scope honest so
+    // they don't read as coverage of a live feature (and keeps ewmaFold's
+    // "(unit-tested)" doc comment accurate).
     (:test)
     function testTsbIdentity(logger) {
-        // TSB == CTL - ATL exactly
+        // TSB == CTL - ATL exactly. Rev-5 retained pure math -- not on any shipped path.
         var tsb = TrainingLoadLedger.tsbFrom(80.0, 95.0);
         return near(tsb, -15.0, 0.0000001);
     }
 
     (:test)
     function testEwmaFold(logger) {
-        // CTL fold toward a higher load rises
+        // CTL fold toward a higher load rises. Rev-5 retained pure math -- not shipped.
         var next = TrainingLoadLedger.ewmaFold(70.0, 200.0, 42.0);
         return next > 70.0 && next < 200.0;
     }
