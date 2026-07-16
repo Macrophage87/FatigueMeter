@@ -91,21 +91,24 @@ jobs:
       # so we isolate the compile first. Running the unit tests via `monkeydo
       # bin/FatigueMeter-test.prg edge1050 -t` (needs xvfb) is a deliberate
       # follow-up once a clean compile is confirmed here.
-      - name: Bisect PureFunctionTests.mc for the construct that crashes --unit-test
+      # Root cause of the #9 --unit-test crash (bisected in CI, run 16): the
+      # (:test) helpers built a non-finite sentinel with the COMPILE-TIME literal
+      # `1.0e30 * 1.0e30`, and monkeyc 9.2.0's constant-folder crashes folding
+      # that overflow-to-Infinity. It only bit in --unit-test mode because the
+      # (:test) code is stripped from the plain build. Fixed by routing every
+      # such sentinel through the existing runtime posInf() helper (b*b on a
+      # variable is not folded). This step compiles the FULL --unit-test build to
+      # confirm the crash is gone. Still advisory until green; then wire in the
+      # monkeydo test execution and promote to a required check.
+      - name: Compile --unit-test (edge1050) — verify the #9 folder-crash fix
         run: |
-          # Prior runs proved: plain build OK; --unit-test crashes on EVERY device
-          # (edge1050/fr965/fenix7x/edge840); removing PureFunctionTests.mc makes
-          # --unit-test compile clean. So a construct in that file crashes the
-          # 9.2.0 test-instrumentation pass. This step keeps only the first K test
-          # functions (K=1..N), compiles --unit-test each time, and reports where
-          # the crash first appears -- isolating the exact culprit function.
-          set +e
+          set -eux
           if ! command -v openssl >/dev/null 2>&1; then apt-get update && apt-get install -y openssl; fi
-          openssl genrsa -out developer_key.pem 4096 2>/dev/null
+          openssl genrsa -out developer_key.pem 4096
           openssl pkcs8 -topk8 -inform PEM -outform DER -in developer_key.pem -out developer_key.der -nocrypt
           mkdir -p bin
-          python3 scripts/bisect_tests.py
-          exit 0
+          monkeyc -f monkey.jungle -o bin/FatigueMeter-test.prg -y developer_key.der -d edge1050 --unit-test
+          echo "unit-test build OK"
 
   # --------------------------------------------------------- traceability lint
   traceability:
