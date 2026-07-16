@@ -17,12 +17,16 @@ using Toybox.Math;
 //! / DfaAlpha1 / TrainingLoadLedger, plus a null-sensor AcuteFatigueFilter.step
 //! assertion.
 //!
-//! SCOPE (honest, per review): 7 of the 10 modules the issue named remain
-//! untested here because they need hardware or an integration harness, NOT this
-//! pure suite -- AntHrm (its pure shouldReopen predicate is covered in
-//! PureFunctionTests), FitLogger, SessionStore + CalibrationFit.save/load,
-//! FatigueMeterApp / FatigueMeterView, DescriptiveStrings, EffortCharacterizer.
-//! These execute under the #42 run-gate (monkeydo -t), not just at compile.
+//! SCOPE (honest, per review): this suite covers the PURE / near-pure surface,
+//! INCLUDING EffortCharacterizer's featScore/attritionScore pure statics (added
+//! below). What remains genuinely needs hardware or an integration harness, NOT
+//! this pure suite: AntHrm channel lifecycle (its pure shouldReopen predicate IS
+//! covered in PureFunctionTests), FitLogger (FitContributor), SessionStore +
+//! CalibrationFit.save/load (Application.Storage), FatigueMeterApp and the
+//! WatchUi-rendering parts of FatigueMeterView (its defaultSnapshot IS already
+//! covered by testViewDefaultSnapshotIsConservative), and DescriptiveStrings
+//! (resource bundle). These tests execute under the #42 run-gate (monkeydo -t),
+//! not just at compile.
 module CoverageTests {
 
     // Local copies of the shared helpers (module-local, no cross-module coupling).
@@ -295,10 +299,15 @@ module CoverageTests {
 
     (:test)
     function testArtifactPercentFlagsSpike(logger) {
-        // clean stationary series ~0 %; a lone doubled RR (missed beat) is caught
+        // clean stationary series ~0 %; a lone doubled RR (missed beat) is caught.
+        // Build the spike INSIDE the loop (via add) rather than index-assigning
+        // spiked[6] -- the type-checker types an empty [] literal as a zero-length
+        // Array and rejects an out-of-range index write on it (SDK 9.2.0).
         var clean = []; var spiked = [];
-        for (var i = 0; i < 12; i++) { clean.add(800.0); spiked.add(800.0); }
-        spiked[6] = 1600.0;
+        for (var i = 0; i < 12; i++) {
+            clean.add(800.0);
+            spiked.add(i == 6 ? 1600.0 : 800.0);
+        }
         var okClean = near(DfaAlpha1.artifactPercent(clean, 0.05), 0.0, 1e-6);
         var okSpike = (DfaAlpha1.artifactPercent(spiked, 0.05) > 0.0);
         return okClean && okSpike;
@@ -338,5 +347,32 @@ module CoverageTests {
         var okA1 = MathUtil.isFinite(filt.latentA1());
         var okClean = (filt.isDegraded() == false);
         return okHr && okF && okAfi && okA1 && okClean;
+    }
+
+    // ---- EffortCharacterizer pure scores (§8.2 — self-labeled unit-testable) ----
+    (:test)
+    function testFeatScoreAccumulatesTerms(logger) {
+        // featScore = kjAboveCp + wSev·severeSec + matchDepth·wMatch + bestBonus,
+        // where bestBonus fires only when be5w > cp. Base case: only kjAboveCp.
+        var base  = EffortCharacterizer.featScore(100.0, 0.0, 0.0, 250.0, 250.0, 2.0, 1.0, 5.0);
+        var severe = EffortCharacterizer.featScore(100.0, 10.0, 0.0, 250.0, 250.0, 2.0, 1.0, 5.0);
+        var bonus = EffortCharacterizer.featScore(100.0, 0.0, 0.0, 300.0, 250.0, 2.0, 1.0, 5.0);
+        var okBase = near(base, 100.0, 1e-9);   // be5w == cp -> no bonus, no other terms
+        var okSevere = (severe > base);          // severe seconds add
+        var okBonus = (bonus > base);            // be5w > cp adds the best-power bonus
+        return okBase && okSevere && okBonus;
+    }
+
+    (:test)
+    function testAttritionScoreAddsDriftTerm(logger) {
+        // attritionScore = accum + (α1 drift below baseline)·wDrift, drift term only
+        // when drift > 0 (a non-positive drift contributes nothing).
+        var noDrift = EffortCharacterizer.attritionScore(5.0, 0.0, 3.0);
+        var withDrift = EffortCharacterizer.attritionScore(5.0, 0.2, 3.0);
+        var negDrift = EffortCharacterizer.attritionScore(5.0, -0.2, 3.0);
+        var okNo = near(noDrift, 5.0, 1e-9);
+        var okWith = near(withDrift, 5.6, 1e-9);   // 5 + 0.2*3
+        var okNeg = near(negDrift, 5.0, 1e-9);      // negative drift ignored
+        return okNo && okWith && okNeg;
     }
 }
