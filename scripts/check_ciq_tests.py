@@ -1,26 +1,33 @@
 #!/usr/bin/env python3
 """Fail-closed pass/fail gate for the Connect IQ "Run No Evil" test-runner output.
 
-The runner's format is now PINNED from a real PR #43 run (run 29513944165). It
-ends with an authoritative summary:
+The runner's format is PINNED from a real PR #43 run. It ends with an
+authoritative summary, e.g. a FAILING run:
 
     Ran 42 tests
 
     FAILED (passed=39, failed=2, errors=1)
 
-(or `PASSED (passed=N, failed=0, errors=0)`), preceded by a RESULTS table whose
-rows read `<TestName>   PASS|FAIL|ERROR`.
+(that historical example predates the #45 fixes; the current suite self-computes
+to 47 (:test) functions and runs green 47/47), or a passing run
+`PASSED (passed=N, failed=0, errors=0)`, preceded by a RESULTS table whose rows
+read `<TestName>   PASS|FAIL|ERROR`.
 
 Green ONLY IF that summary is present AND is `PASSED` AND failed==0 AND errors==0
-AND passed==ran==the (:test) count in source. We trust the runner's own explicit
-counts (not a bare `PASSED` token, and not scraped per-test lines, which the
-runner prints twice -- once inline, once in the RESULTS table). If the summary is
-not parseable at all the gate FAILS (fail-closed), so an unrecognised format is
-RED, never a false green.
+AND passed==ran==the (:test) count in source AND that count is > 0 AND the run
+executed > 0 tests -- so an empty suite that emits `Ran 0 tests / PASSED
+(passed=0,...)` can NEVER go green. We trust the runner's own explicit counts
+(not a bare `PASSED` token, and not scraped per-test lines, which the runner
+prints twice -- once inline, once in the RESULTS table). If the summary is not
+parseable at all the gate FAILS (fail-closed), so an unrecognised format is RED,
+never a false green.
 
 Note: `ran` counts every (:test) symbol the runner executes across ALL modules,
 so a helper wrongly tagged (:test) (e.g. a method that takes arguments) shows up
 as an extra ERROR and makes ran != expected -- which the gate correctly reddens.
+`expected` counts (:test) in PureFunctionTests.mc only (where the real tests
+live); if a genuine test is ever added to another module, add that module to the
+count here too, or `ran > expected` will (correctly, but confusingly) redden.
 """
 import pathlib
 import re
@@ -56,6 +63,7 @@ failed = int(sum_m.group(3))
 errors = int(sum_m.group(4))
 
 ok = (verdict == "PASSED" and failed == 0 and errors == 0
+      and expected > 0 and ran > 0          # never green on an empty/zero-test run
       and passed == expected and ran == expected)
 
 print(f"expected={expected} ran={ran} passed={passed} "

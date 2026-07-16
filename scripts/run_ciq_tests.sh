@@ -138,7 +138,25 @@ tail -80 sim-sim.log 2>/dev/null || true
 echo "===== END simulator output ====="
 
 if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
-  echo "::error::monkeydo timed out after ${RUN_TIMEOUT}s"; exit 1
+  # timeout(1) exits 124 on expiry; with --signal=KILL the killed child can also
+  # surface as 137 (128+SIGKILL). Either way monkeydo did not finish in time (a
+  # rare external OOM/SIGKILL is the only other way to see 137).
+  echo "::error::monkeydo did not complete within ${RUN_TIMEOUT}s (killed)"; exit 1
 fi
 
+# Run the strict gate, but surface an EXPLICIT PASS/FAIL regardless of the job's
+# continue-on-error masking: while this job is advisory the green check tick
+# alone proves nothing, so also write the verdict to the step summary. The gate's
+# exit code is preserved (the step still fails on a real failure).
+set +e
 python3 scripts/check_ciq_tests.py "$LOG"
+gate=$?
+set -e
+if [ "$gate" = 0 ]; then
+  echo "TESTS: PASS"
+  echo "### CIQ unit tests: ✅ PASS (${DEVICE})" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+else
+  echo "TESTS: FAIL"
+  echo "### CIQ unit tests: ❌ FAIL (${DEVICE}) — see the 'Run tests headlessly' step log" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+fi
+exit "$gate"

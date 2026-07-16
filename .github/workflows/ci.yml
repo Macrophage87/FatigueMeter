@@ -55,7 +55,8 @@ jobs:
   # each) and already catches the crash-class this project cares about:
   # illegal-API-for-datafield regressions, test-compilation breakage, and the
   # monkeyc constant-folder crash fixed in #9 -- across all supported devices,
-  # not just edge1050. Actually RUNNING the 41 `(:test)` functions (monkeydo
+  # not just edge1050. Actually RUNNING the `(:test)` functions (47 today, but the
+  # gate self-computes the count from source, so this comment can't go stale) (monkeydo
   # under xvfb) is deferred: the image's `tester.sh` hangs because it has no
   # simulator-readiness probe (seen on #40's run). That work is tracked in #42
   # (bounded readiness probe -> run -> strict PASS/FAIL parse -> promote to
@@ -140,7 +141,8 @@ jobs:
   #
   # ADVISORY (`continue-on-error: true`, NOT in `ci-required.needs`). Promote to
   # REQUIRED only after the first run is confirmed genuinely green (single Xvfb/
-  # sim, ran==passes==41, failed==0) -- see #42. Until then it can never wedge
+  # sim, ran==passed==expected, failed==0, errors==0; 47/47 today) -- see #42.
+  # Until then it can never wedge
   # `main`.
   simulate:
     name: Run unit tests (advisory)
