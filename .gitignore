@@ -8,3 +8,7 @@ bin/
 *.der
 *.pem
 developer_key.*
+
+# Python bytecode (from scripts/*.py, e.g. the CI test-gate parser)
+__pycache__/
+*.pyc
