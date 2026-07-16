@@ -401,7 +401,7 @@ module PureFunctionTests {
 
     (:test)
     function testSymmetrizeScrubsNonFiniteDiagonal(logger) {
-        var inf = 1.0e30 * 1.0e30;
+        var inf = posInf();   // runtime +Inf; literal 1.0e30*1.0e30 crashes 9.2.0 folder (#9)
         var nan = inf - inf;
         var P = KalmanMath.zeros4x4();
         P[0][0] = 5.0;
@@ -419,7 +419,7 @@ module PureFunctionTests {
 
     (:test)
     function testSymmetrizeScrubsNonFiniteOffDiagonal(logger) {
-        var inf = 1.0e30 * 1.0e30;
+        var inf = posInf();   // runtime +Inf; literal 1.0e30*1.0e30 crashes 9.2.0 folder (#9)
         var P = KalmanMath.zeros4x4();
         P[0][3] = inf;   // avg (inf + 0)/2 = inf -> non-finite -> scrub both halves to 0
         P[3][0] = 0.0;
@@ -437,7 +437,7 @@ module PureFunctionTests {
         // poison x (x[i] + NaN·innov = NaN). The result is finite here ONLY
         // because the guard skips the channel and returns [x, P] unchanged -> so
         // this assertion FAILS on pre-fix code and passes on the fixed code.
-        var inf = 1.0e30 * 1.0e30;
+        var inf = posInf();   // runtime +Inf; literal 1.0e30*1.0e30 crashes 9.2.0 folder (#9)
         var nan = inf - inf;
         var x = [0.0, 100.0, 0.75, 0.0];
         var P = KalmanMath.zeros4x4();
@@ -449,7 +449,7 @@ module PureFunctionTests {
 
     (:test)
     function testScalarUpdateKeepsPFiniteFromNonFiniteP(logger) {
-        var inf = 1.0e30 * 1.0e30;
+        var inf = posInf();   // runtime +Inf; literal 1.0e30*1.0e30 crashes 9.2.0 folder (#9)
         var x = [0.0, 100.0, 0.75, 0.0];
         var P = KalmanMath.zeros4x4();
         P[1][1] = 25.0;
@@ -461,7 +461,7 @@ module PureFunctionTests {
 
     (:test)
     function testPredictKeepsPFiniteFromNonFiniteP(logger) {
-        var inf = 1.0e30 * 1.0e30;
+        var inf = posInf();   // runtime +Inf; literal 1.0e30*1.0e30 crashes 9.2.0 folder (#9)
         var x = [0.0, 100.0, 0.75, 0.0];
         var P = KalmanMath.zeros4x4();
         P[0][0] = inf;                              // non-finite covariance entering predict
@@ -473,7 +473,7 @@ module PureFunctionTests {
 
     (:test)
     function testIsFiniteVectorAndMatrix(logger) {
-        var inf = 1.0e30 * 1.0e30;
+        var inf = posInf();   // runtime +Inf; literal 1.0e30*1.0e30 crashes 9.2.0 folder (#9)
         var vBad = [1.0, inf, 3.0, 4.0];
         var mBad = KalmanMath.zeros4x4();
         mBad[2][3] = inf - inf;                     // NaN
@@ -488,7 +488,7 @@ module PureFunctionTests {
         // 30. With the isFinite(power) gate the +Inf is treated as missing (falls
         // back to lastKnownPower), so both trajectories stay finite, track together,
         // and neither degrades — i.e. the filter self-heals instead of flooring.
-        var inf = 1.0e30 * 1.0e30;
+        var inf = posInf();   // runtime +Inf; literal 1.0e30*1.0e30 crashes 9.2.0 folder (#9)
         var cfg = new Config();
         var control  = new AcuteFatigueFilter(cfg);
         var injected = new AcuteFatigueFilter(cfg);
@@ -516,7 +516,7 @@ module PureFunctionTests {
         // (:test)-only debugInjectNonFiniteState seam to poke a genuine NaN into
         // the HR state, then a single step() must trip the finite check, latch
         // isDegraded(), and scrub the poisoned component back to its safe seed.
-        var inf = 1.0e30 * 1.0e30;
+        var inf = posInf();   // runtime +Inf; literal 1.0e30*1.0e30 crashes 9.2.0 folder (#9)
         var nan = inf - inf;
         var cfg = new Config();
         var filt = new AcuteFatigueFilter(cfg);
