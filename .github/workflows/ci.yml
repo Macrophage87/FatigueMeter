@@ -91,18 +91,35 @@ jobs:
       # so we isolate the compile first. Running the unit tests via `monkeydo
       # bin/FatigueMeter-test.prg edge1050 -t` (needs xvfb) is a deliberate
       # follow-up once a clean compile is confirmed here.
-      - name: Compile via BUILD.md invocation (edge1050, --unit-test; no tester.sh, no -l)
+      - name: Diagnose monkeyc crash (version, wrapper, with/without --unit-test)
         run: |
-          set -eux
-          # BUILD.md generates a throwaway developer key with these two openssl
-          # commands; monkeyc requires a signing key even for a unit-test build.
+          # Do NOT fail-fast: run every probe and report each exit code so a
+          # single CI run pins which dimension (plain vs --unit-test vs -l)
+          # triggers the opaque "critical error" crash.
+          set +e
+          echo "===== which/monkeyc wrapper (find the underlying java -jar + any log/heap knob) ====="
+          which monkeyc
+          cat "$(which monkeyc)" 2>&1 || true
+          echo "===== SDK version ====="
+          monkeyc --version 2>&1 || true
+          echo "===== keys ====="
           if ! command -v openssl >/dev/null 2>&1; then apt-get update && apt-get install -y openssl; fi
-          openssl genrsa -out developer_key.pem 4096
-          openssl pkcs8 -topk8 -inform PEM -outform DER -in developer_key.pem \
-              -out developer_key.der -nocrypt
+          openssl genrsa -out developer_key.pem 4096 2>/dev/null
+          openssl pkcs8 -topk8 -inform PEM -outform DER -in developer_key.pem -out developer_key.der -nocrypt
           mkdir -p bin
-          # EXACT BUILD.md unit-test compile command (see BUILD.md "Unit tests").
-          monkeyc -f monkey.jungle -o bin/FatigueMeter-test.prg -y developer_key.der -d edge1050 --unit-test
+          echo "===== PROBE A: plain build — owner's KNOWN-GOOD local command (NO --unit-test) ====="
+          monkeyc -f monkey.jungle -o bin/A.prg -y developer_key.der -d edge1050 2>&1
+          echo "PROBE_A_EXIT=$?"
+          echo "===== PROBE B: --unit-test (BUILD.md test command; the one that crashed) ====="
+          monkeyc -f monkey.jungle -o bin/B.prg -y developer_key.der -d edge1050 --unit-test 2>&1
+          echo "PROBE_B_EXIT=$?"
+          echo "===== PROBE C: --unit-test -l 0 (silent type-check) ====="
+          monkeyc -f monkey.jungle -o bin/C.prg -y developer_key.der -d edge1050 --unit-test -l 0 2>&1
+          echo "PROBE_C_EXIT=$?"
+          echo "===== any compiler logs written in the last few minutes ====="
+          find / -name '*.log' -newermt '-5 minutes' 2>/dev/null | head -20 || true
+          echo "===== done ====="
+          exit 0
 
   # --------------------------------------------------------- traceability lint
   traceability:
