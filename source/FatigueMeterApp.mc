@@ -21,8 +21,8 @@ class FatigueMeterApp extends Application.AppBase {
     //! Guarded so nothing here can crash on shutdown. NOTE: a Data Field may NOT
     //! call Sensor.(un)registerSensorDataListener -- it throws "Permission
     //! Required" at runtime (surfaced once the tests actually ran, see #42). This
-    //! app never registers a Sensor listener (RR comes from a raw ANT+ channel,
-    //! released in finalizeSession), so there is nothing to unregister here.
+    //! app never registers a Sensor listener (RR comes from a raw ANT+ channel),
+    //! so there is nothing to unregister here.
     function onStop(state) {
         try {
             if (view != null) { view.finalizeSession(); }
