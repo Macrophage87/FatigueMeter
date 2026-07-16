@@ -375,4 +375,44 @@ module CoverageTests {
         var okNeg = near(negDrift, 5.0, 1e-9);      // negative drift ignored
         return okNo && okWith && okNeg;
     }
+
+    // ---- StatusEvaluator null-guard hardening (#10) ----
+    // Each test isolates ONE of the three guards so a regression in one can't be
+    // masked by another. #53's testStatusNoSensorsIsNoData already covers explicit
+    // :sensorsPresent=>false; these cover the ABSENT-key (null) + null-metric paths
+    // it left open. Defensive/unit-testability hardening, not a live-crash fix:
+    // the live caller always passes non-null and evaluate() runs inside compute()'s
+    // try/catch.
+
+    (:test)
+    function testStatusMissingSensorsKeyIsNoData(logger) {
+        // Guard 1: an ABSENT :sensorsPresent key reads null. The old
+        // `!ctx[:sensorsPresent]` threw UnexpectedTypeException; `!= true` falls
+        // through to NODATA.
+        var r = StatusEvaluator.evaluate(new Config(), {});
+        return r[:status] == DescriptiveStrings.STATUS_NODATA;
+    }
+
+    (:test)
+    function testStatusNullWRrNoCrash(logger) {
+        // Guard 2: sensors present but :wRr null must not throw on `wRr < 0.5`;
+        // null -> decoupOnly false (signal not asserted).
+        var ctx = baseStatusCtx();
+        ctx[:wRr] = null;
+        var r = StatusEvaluator.evaluate(new Config(), ctx);
+        return r[:decoupOnly] == false;
+    }
+
+    (:test)
+    function testStatusNullElapsedNoCrash(logger) {
+        // Guard 3: sensors present but :elapsedS null must not throw on
+        // `elapsed >= DURABILITY_MIN_S`; null -> pastTime false, so the durability
+        // advisory cannot fire even with kJ + decoupling otherwise qualifying.
+        var ctx = baseStatusCtx();
+        ctx[:elapsedS] = null;
+        ctx[:kjWeighted] = 999999.0;                       // would-be pastKj
+        ctx[:decoupMetric] = Signals.Metric.ok(9.0, 1.0);  // > decoupCaution
+        var r = StatusEvaluator.evaluate(new Config(), ctx);
+        return r[:advisoryActive] == false;
+    }
 }

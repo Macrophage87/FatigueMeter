@@ -21,7 +21,11 @@ class StatusEvaluator {
     static function evaluate(cfg, ctx) {
         // ctx keys: afi, decoupMetric(Signals.Metric), alpha1Metric, kjWeighted,
         //           elapsedS, wRr, redKind, sensorsPresent
-        if (!ctx[:sensorsPresent]) {
+        // `!= true` (not `!ctx[...]`): an ABSENT key reads null, and `!null` throws
+        // UnexpectedTypeException. Only an explicit true proceeds; null/absent falls
+        // through to NODATA. Defensive hardening -- the live caller always passes a
+        // bool here and evaluate() is inside compute()'s try/catch (#10).
+        if (ctx[:sensorsPresent] != true) {
             return { :status => DescriptiveStrings.STATUS_NODATA, :redKind => "none",
                      :advisoryActive => false, :alpha1Gated => true, :decoupOnly => true };
         }
@@ -34,7 +38,7 @@ class StatusEvaluator {
         var wRr = ctx[:wRr];
 
         var alpha1Gated = !(alpha1Metric != null && alpha1Metric.availability == Signals.AVAIL_OK);
-        var decoupOnly = (wRr < 0.5);
+        var decoupOnly = (wRr != null && wRr < 0.5);   // null-guard the compare (#10)
 
         // --- durability advisory (§6): needs time-on-task + decoupling drift ---
         // above the athlete's OWN early-ride baseline (decoupling% already IS the
@@ -43,7 +47,7 @@ class StatusEvaluator {
         var decoupUsable = (decoupMetric != null && decoupMetric.isUsable());
         if (decoupUsable) { decoupDrift = decoupMetric.value; }
 
-        var pastTime = (elapsed >= Constants.DURABILITY_MIN_S);
+        var pastTime = (elapsed != null && elapsed >= Constants.DURABILITY_MIN_S);   // null-guard (#10)
         var pastKj = (kjw != null && kjw >= 0.6 * cfg.kjAnchor);
         var decoupHigh = decoupUsable && (decoupDrift > cfg.decoupCaution);
 
