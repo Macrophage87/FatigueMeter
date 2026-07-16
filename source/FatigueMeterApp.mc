@@ -35,8 +35,13 @@ class FatigueMeterApp extends Application.AppBase {
     }
 
     //! Settings changed in Garmin Connect / Express -> refresh the live Config.
+    //! Guarded (§8.4, #13): a settings-change exception must not crash the whole
+    //! field to the CIQ banner. The view's onSettingsChanged is itself a no-op
+    //! when construction failed (its `ready` gate).
     function onSettingsChanged() {
-        if (view != null) { view.onSettingsChanged(); }
+        try {
+            if (view != null) { view.onSettingsChanged(); }
+        } catch (e) { }
         WatchUi.requestUpdate();
     }
 }
