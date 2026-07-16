@@ -24,10 +24,24 @@ module Signals {
         var label;         // short marker shown when not OK, e.g. "no power", "artifact 7%"
 
         function initialize(v, a, q, lbl) {
-            value = v;
-            availability = a;
-            quality = q;
-            label = lbl;
+            // §8.4 invariant: a Metric never carries NaN/Inf. If a calculator
+            // hands us a non-finite value (e.g. a 0/0 HRV ratio), drop it and
+            // grey the tile out rather than letting the bad number reach
+            // compute()/rendering. Every factory and every `new Metric(...)`
+            // routes through here, so this is the single enforcement point.
+            if (v != null && !MathUtil.isFinite(v)) {
+                value = null;
+                availability = AVAIL_UNAVAILABLE;
+                quality = 0.0;
+                label = (lbl != null) ? lbl : "--";
+            } else {
+                value = v;
+                availability = a;
+                // clamp scrubs NaN->0.0 and +Inf->1.0; null-guard avoids
+                // comparing null in clamp.
+                quality = (q == null) ? 0.0 : MathUtil.clamp(q, 0.0, 1.0);
+                label = lbl;
+            }
         }
 
         //! Convenience constructors.
@@ -45,11 +59,14 @@ module Signals {
         }
 
         function isUsable() {
+            // isFinite(null) == false, so this subsumes the old null check and
+            // also rejects a value mutated to NaN/Inf after construction (the
+            // fields are public vars).
             return (availability == AVAIL_OK || availability == AVAIL_LOW_CONF)
-                   && value != null;
+                   && MathUtil.isFinite(value);
         }
         function isPresent() {
-            return value != null && availability != AVAIL_UNAVAILABLE;
+            return MathUtil.isFinite(value) && availability != AVAIL_UNAVAILABLE;
         }
     }
 }
