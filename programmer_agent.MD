@@ -42,6 +42,25 @@ _My understanding of how I'm meant to operate on this repo. Please edit anything
 - New CI gates start **advisory** (`continue-on-error: true`, not in `ci-required.needs`).
 - I do **not** promote a gate to **required** (drop `continue-on-error`, add to `ci-required.needs`, apply branch-protection) until **both**: (a) a confirmed clean green run, and (b) explicit user confirmation.
 
+### #42 status: gates promoted, branch protection PENDING (repo-admin)
+- **Done (merged):** PR #43 landed the advisory `simulate` gate; PR #48 promoted **`test`** (compile `--unit-test`, all 8 devices) and **`simulate`** (run the `(:test)` suite headlessly) to **required** — both now in `ci-required.needs` with no `continue-on-error`. `traceability` stays advisory.
+- **Why that alone is not enforcement:** the workflow only *posts* the `ci-required` status; it blocks nothing until branch protection **requires** that context on `main`. That is a repo-admin action I **cannot** perform from this session — the GitHub MCP server has no branch-protection tool, and a direct `api.github.com/.../branches/main/protection` call is refused by the egress proxy with an org-policy 403 (report, don't route around).
+- **Enforcement step for the repo admin (GitHub → Settings → Branches → rule on `main`):**
+  1. **Require status checks to pass** → add exactly one required context: **`ci-required`** (it transitively requires `manifest-lint` + `test` + `simulate`; listing only the aggregator avoids the stale-name trap).
+  2. **Require branches to be up to date before merging** (strict) → on.
+  3. **Do not allow bypassing the above settings** / include administrators → on (else a red PR can still be admin-merged).
+  4. **Retire any stale required check name** — e.g. an old `Run unit tests (advisory)` / `Compile --unit-test, all devices (advisory)` context. Those jobs lost the `(advisory)` suffix in #48, so a lingering required name that no longer posts a status would block **all** merges forever.
+  - `gh` equivalent:
+    ```bash
+    gh api -X PUT repos/Macrophage87/FatigueMeter/branches/main/protection \
+      -H "Accept: application/vnd.github+json" \
+      -f 'required_status_checks[strict]=true' \
+      -f 'required_status_checks[contexts][]=ci-required' \
+      -F 'enforce_admins=true' \
+      -F 'required_pull_request_reviews=null' \
+      -F 'restrictions=null'
+    ```
+
 ## Diagnostic methodology
 - **Verify, don't guess.** Diagnose in CI with real captured evidence (diagnostic-first: dump the actual runner/format/state), then pin to reality — rather than assuming.
 - **Fail-closed** parsing/gates: an unrecognized or absent signal is RED, never a false green.
