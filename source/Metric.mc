@@ -69,4 +69,31 @@ module Signals {
             return MathUtil.isFinite(value) && availability != AVAIL_UNAVAILABLE;
         }
     }
+
+    // ---- Pure staleness/validity classifiers (#11) ----
+    // The AntHrm decode()/hrMetric() paths touch hardware + the System clock, so
+    // the DECISION logic is factored into these pure statics -- the same
+    // "PURE STATIC MATH (unit-testable)" split the rest of the codebase uses.
+
+    //! Byte 7 of an ANT+ HRM page: 0 == no skin contact / no reading. Pure.
+    function hrByteValid(b) {
+        return (b & 0xFF) != 0;
+    }
+
+    //! Freshness test: a valid sample at lastMs is fresh at nowMs if it exists
+    //! (lastMs >= 0), is not in the future, and is within windowMs. Pure.
+    function freshWithin(lastMs, nowMs, windowMs) {
+        if (lastMs < 0) { return false; }        // never seen
+        var age = nowMs - lastMs;
+        return age >= 0 && age <= windowMs;
+    }
+
+    //! Map a sample age to an availability state (§8.4 stale -> unavailable). Pure.
+    //! Uses strict > so ageMs == staleMs is still OK and ageMs == unavailMs is
+    //! still STALE (the boundaries belong to the fresher state).
+    function hrAvailability(hasSample, ageMs, staleMs, unavailMs) {
+        if (!hasSample || ageMs > unavailMs) { return AVAIL_UNAVAILABLE; }
+        if (ageMs > staleMs) { return AVAIL_STALE; }
+        return AVAIL_OK;
+    }
 }

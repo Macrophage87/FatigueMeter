@@ -256,6 +256,43 @@ module PureFunctionTests {
     }
 
     (:test)
+    function testHrByteZeroIsNoData(logger) {
+        // #11: byte 7 == 0 (lost skin contact) rejected; a real bpm accepted; a
+        // value that masks to 0 (0x100) is still no-data.
+        var okZero = !Signals.hrByteValid(0);
+        var okReal = Signals.hrByteValid(60);
+        var okMask = !Signals.hrByteValid(0x100);   // & 0xFF -> 0
+        return okZero && okReal && okMask;
+    }
+
+    (:test)
+    function testHrFreshWithinWindow(logger) {
+        // #11: fresh iff it exists, is non-future, and is within the window --
+        // INCLUDING the age == window boundary (still fresh).
+        var okMid   = Signals.freshWithin(1000, 3000, 5000);    // 2 s old -> fresh
+        var okEdge  = Signals.freshWithin(1000, 6000, 5000);    // age == window (5 s) -> fresh
+        var okOld   = !Signals.freshWithin(1000, 20000, 5000);  // 19 s old -> not fresh
+        var okNever = !Signals.freshWithin(-1, 3000, 5000);     // never seen -> not fresh
+        var okSkew  = !Signals.freshWithin(5000, 3000, 5000);   // negative age (skew) -> not fresh
+        return okMid && okEdge && okOld && okNever && okSkew;
+    }
+
+    (:test)
+    function testHrAvailabilityTransitions(logger) {
+        // #11 §8.4: OK -> STALE -> UNAVAILABLE. Strict > means each boundary belongs
+        // to the FRESHER state: age == staleMs is still OK, age == unavailMs STALE.
+        var stale = 5000;
+        var unavail = 15000;
+        var okNever  = Signals.hrAvailability(false, 0, stale, unavail)      == Signals.AVAIL_UNAVAILABLE;
+        var okOk     = Signals.hrAvailability(true, 2000, stale, unavail)    == Signals.AVAIL_OK;
+        var okStaleE = Signals.hrAvailability(true, stale, stale, unavail)   == Signals.AVAIL_OK;      // == stale -> OK
+        var okStale  = Signals.hrAvailability(true, 8000, stale, unavail)    == Signals.AVAIL_STALE;
+        var okUnavE  = Signals.hrAvailability(true, unavail, stale, unavail) == Signals.AVAIL_STALE;   // == unavail -> STALE
+        var okUnav   = Signals.hrAvailability(true, 20000, stale, unavail)   == Signals.AVAIL_UNAVAILABLE;
+        return okNever && okOk && okStaleE && okStale && okUnavE && okUnav;
+    }
+
+    (:test)
     function testKalmanUpdateMovesState(logger) {
         // a scalar HR update pulls the HR state toward the measurement
         var x = [0.0, 100.0, 0.75, 0.0];

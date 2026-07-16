@@ -1,5 +1,6 @@
 using Toybox.Ant;
 using Toybox.Lang;
+using Toybox.System;   // System.getTimer(): monotonic ms-since-boot staleness clock
 
 //! ANT+ Heart Rate Monitor RR-interval reader for a DATA FIELD.
 //!
@@ -29,7 +30,9 @@ class AntHrm extends Ant.GenericChannel {
     hidden var havePrev;
     hidden var prevTime;        // last heart-beat event time (1/1024 s)
     hidden var prevCount;       // last heart-beat count (rolls at 256)
-    hidden var lastHr;          // last computed HR (bpm) from the strap
+    hidden var lastHr;          // last VALID HR (bpm); 0 / no-contact is NEVER stored here (#11)
+    hidden var hasHr;           // true once a non-zero HR page has been decoded (#11)
+    hidden var lastHrMs;        // System.getTimer() at the last VALID HR page (staleness clock, #11)
 
     function initialize() {
         var assign = new Ant.ChannelAssignment(Ant.CHANNEL_TYPE_RX_ONLY, Ant.NETWORK_PLUS);
@@ -39,6 +42,8 @@ class AntHrm extends Ant.GenericChannel {
         prevTime = 0;
         prevCount = 0;
         lastHr = 0;
+        hasHr = false;
+        lastHrMs = -1;
         opened = false;
         closing = false;
 
@@ -70,7 +75,25 @@ class AntHrm extends Ant.GenericChannel {
     }
 
     function isOpen() { return opened; }
-    function heartRate() { return lastHr; }
+
+    //! Raw last-VALID HR (bpm), or null if none has ever been seen. NEVER 0 -- a
+    //! byte-7==0 (lost-contact) page never overwrites a good value (#11). Callers
+    //! must null-check, matching every other HR read in the codebase.
+    function heartRate() { return hasHr ? lastHr : null; }
+
+    //! Fault-isolated strap HR as a Metric (§8.4): OK while fresh, STALE while
+    //! holding a recent-but-aging value, UNAVAILABLE when never seen or long dead.
+    //! Pass System.getTimer() as nowMs. Decision logic is the pure Signals
+    //! classifier so it stays unit-testable (#11). Consumer wiring is tracked in
+    //! the #11 follow-up (#57); AntHrm currently feeds only RR via drainRr().
+    function hrMetric(nowMs) {
+        var ageMs = (lastHrMs >= 0) ? (nowMs - lastHrMs) : 0x7FFFFFFF;
+        var avail = Signals.hrAvailability(hasHr, ageMs,
+                        Constants.HR_STALE_S * 1000, Constants.HR_UNAVAIL_S * 1000);
+        if (avail == Signals.AVAIL_OK)    { return Signals.Metric.ok(lastHr, 1.0); }
+        if (avail == Signals.AVAIL_STALE) { return Signals.Metric.stale(lastHr, "HR stale"); }
+        return Signals.Metric.unavailable("no HR");
+    }
 
     //! Return the RR intervals (ms) buffered since the last call, and clear the
     //! buffer. Called once per second by the compute loop.
@@ -118,7 +141,14 @@ class AntHrm extends Ant.GenericChannel {
     //! gate handles) rather than fabricate an interval.
     hidden function decode(d) {
         if (d == null || d.size() < 8) { return; }
-        lastHr = d[7] & 0xFF;
+        // Byte 7 == 0 means loss of skin contact / no reading: never let it
+        // overwrite a good HR, and never surface it as a usable value (#11). RR
+        // reconstruction (bytes 4/5/6) is independent of byte 7 and unaffected.
+        if (Signals.hrByteValid(d[7])) {
+            lastHr = d[7] & 0xFF;
+            hasHr = true;
+            lastHrMs = System.getTimer();
+        }
         var beatTime = (d[4] & 0xFF) | ((d[5] & 0xFF) << 8);
         var beatCount = d[6] & 0xFF;
         if (!havePrev) {
