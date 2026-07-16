@@ -224,9 +224,15 @@ module PureFunctionTests {
         // §4.4 / harness: on a coast (inactive, low power) F must NOT increase.
         var cfg = new Config();
         var filt = new AcuteFatigueFilter(cfg);
-        // charge F up first with an active hard effort
+        // Charge F up first with an active hard effort. F is the residual HR
+        // drift ABOVE the fresh-HR prediction (hrRest + gP*power ~= 170 bpm at
+        // this power), so the measured HR must EXCEED that prediction for F to
+        // build -- 160 bpm sits below it, keeps the innovation negative, and F
+        // never charges (F stays 0, so the coast assertion is vacuously false).
+        // Use 185 bpm (below hrMax 190): a physiologically consistent hard effort
+        // that genuinely accumulates fatigue drift (surfaced by the #42 test run).
         for (var i = 0; i < 300; i++) {
-            filt.step(cfg.pAeT + 80.0, 160.0, null, 100.0, 0.0, true, true);
+            filt.step(cfg.pAeT + 80.0, 185.0, null, 100.0, 0.0, true, true);
         }
         var fCharged = filt.fState();
         // now coast: inactive, no power, and HR dropped out (predict-only) so the
