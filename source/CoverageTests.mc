@@ -2,14 +2,15 @@ using Toybox.Lang;
 using Toybox.Test;
 using Toybox.Math;
 
-//! Coverage-sweep unit tests (#14) — split OUT of PureFunctionTests.mc into their
-//! own module so neither file is large enough to exhaust the Monkey C
-//! type-checker's fixed heap (the SDK 9.2.0 `monkeyc --unit-test` compile
-//! OOM'd -- FunctionTypeChecker.combineSubstitutions -- once PureFunctionTests
-//! passed ~75 (:test) functions in ONE module; splitting keeps each module well
-//! under that threshold). The CIQ "Run No Evil" runner executes (:test) functions
-//! across ALL modules, and scripts/check_ciq_tests.py counts them across all
-//! source files, so the split is transparent to the gate.
+//! Coverage-sweep unit tests (#14) — kept in their own module, split out of
+//! PureFunctionTests.mc (#14). Each test is written to keep the Monkey C
+//! type-checker's per-function work SMALL: no method calls on a dictionary value
+//! of static type Object? (that forces method resolution over a wide union), no
+//! heterogeneous CONTAINER literal holding class instances (that forces a
+//! value-type overlap computation), and no deep boolean expression tree (every
+//! condition is a shallow `var okN = ...;` so `combineSubstitutions` never
+//! recurses deeply). The SDK 9.2.0 `monkeyc --unit-test` type-checker OOM'd on
+//! the first, denser draft; this shape compiles within its fixed heap.
 //!
 //! Closes the PURE / near-pure coverage gaps the issue names: StatusEvaluator,
 //! CalibrationFit, RingBuffer, and finite-safety guards for MathUtil / KalmanMath
@@ -18,16 +19,13 @@ using Toybox.Math;
 //!
 //! SCOPE (honest, per review): 7 of the 10 modules the issue named remain
 //! untested here because they need hardware or an integration harness, NOT this
-//! pure suite -- AntHrm (ANT channel; its pure shouldReopen predicate is covered
-//! in PureFunctionTests), FitLogger (FitContributor), SessionStore +
-//! CalibrationFit.save/load (Application.Storage), FatigueMeterApp /
-//! FatigueMeterView (WatchUi lifecycle), DescriptiveStrings (resource bundle),
-//! EffortCharacterizer (follow-up). These execute under the #42 run-gate
-//! (monkeydo -t), not just at compile.
+//! pure suite -- AntHrm (its pure shouldReopen predicate is covered in
+//! PureFunctionTests), FitLogger, SessionStore + CalibrationFit.save/load,
+//! FatigueMeterApp / FatigueMeterView, DescriptiveStrings, EffortCharacterizer.
+//! These execute under the #42 run-gate (monkeydo -t), not just at compile.
 module CoverageTests {
 
-    // Local copies of the shared helpers (kept module-local so this file has no
-    // cross-module test-helper coupling). Mirrors PureFunctionTests.near/posInf.
+    // Local copies of the shared helpers (module-local, no cross-module coupling).
     function near(a, b, tol) {
         var d = a - b;
         if (d < 0) { d = -d; }
@@ -36,57 +34,70 @@ module CoverageTests {
     function posInf() { var b = 9.0e37; return b * b; }
 
     // ---- StatusEvaluator (§4.5/§6/§8.2 band logic) ----
-    // Helper (NOT a :test): an all-fresh, sensors-present baseline ctx each test
-    // mutates -- mirrors how near() is a shared helper in this module.
+    // Helper (NOT a :test). The literal holds PRIMITIVES only; the Metric objects
+    // are added by assignment so the literal's value-type overlap stays trivial.
     function baseStatusCtx() {
-        return { :afi => 10.0,
-                 :decoupMetric => Signals.Metric.ok(2.0, 1.0),
-                 :alpha1Metric => Signals.Metric.ok(0.95, 1.0),
-                 :kjWeighted => 0.0, :elapsedS => 0, :wRr => 1.0,
-                 :redKind => "none", :sensorsPresent => true, :afiDrift => 0.0 };
+        var ctx = { :afi => 10.0, :kjWeighted => 0.0, :elapsedS => 0, :wRr => 1.0,
+                    :redKind => "none", :sensorsPresent => true, :afiDrift => 0.0 };
+        ctx[:decoupMetric] = Signals.Metric.ok(2.0, 1.0);
+        ctx[:alpha1Metric] = Signals.Metric.ok(0.95, 1.0);
+        return ctx;
     }
 
     (:test)
     function testStatusNoSensorsIsNoData(logger) {
-        var cfg = new Config();
         var ctx = baseStatusCtx();
         ctx[:sensorsPresent] = false;
-        var r = StatusEvaluator.evaluate(cfg, ctx);
-        return r[:status] == DescriptiveStrings.STATUS_NODATA
-            && r[:alpha1Gated] && r[:decoupOnly] && !r[:advisoryActive];
+        var r = StatusEvaluator.evaluate(new Config(), ctx);
+        var okStatus = (r[:status] == DescriptiveStrings.STATUS_NODATA);
+        var okGated = (r[:alpha1Gated] == true);
+        var okDecoup = (r[:decoupOnly] == true);
+        var okAdv = (r[:advisoryActive] == false);
+        return okStatus && okGated && okDecoup && okAdv;
     }
 
     (:test)
     function testStatusFreshBaseline(logger) {
-        var cfg = new Config();
-        var r = StatusEvaluator.evaluate(cfg, baseStatusCtx());  // afi 10 < afiFresh 30
-        return r[:status] == DescriptiveStrings.STATUS_FRESH
-            && !r[:alpha1Gated] && !r[:decoupOnly];
+        var r = StatusEvaluator.evaluate(new Config(), baseStatusCtx());  // afi 10 < afiFresh 30
+        var okStatus = (r[:status] == DescriptiveStrings.STATUS_FRESH);
+        var okGated = (r[:alpha1Gated] == false);
+        var okDecoup = (r[:decoupOnly] == false);
+        return okStatus && okGated && okDecoup;
     }
 
     (:test)
-    function testStatusBuildingFromAfiOrDecoup(logger) {
-        var cfg = new Config();
-        var byAfi = baseStatusCtx();     byAfi[:afi] = 45.0;   // in [afiFresh 30, afiBuilding 60)
-        var byDecoup = baseStatusCtx();  byDecoup[:decoupMetric] = Signals.Metric.ok(6.0, 1.0); // > decoupOk 5
-        return StatusEvaluator.evaluate(cfg, byAfi)[:status] == DescriptiveStrings.STATUS_BUILDING
-            && StatusEvaluator.evaluate(cfg, byDecoup)[:status] == DescriptiveStrings.STATUS_BUILDING;
+    function testStatusBuildingFromAfi(logger) {
+        var ctx = baseStatusCtx();
+        ctx[:afi] = 45.0;                        // in [afiFresh 30, afiBuilding 60)
+        var r = StatusEvaluator.evaluate(new Config(), ctx);
+        return r[:status] == DescriptiveStrings.STATUS_BUILDING;
+    }
+
+    (:test)
+    function testStatusBuildingFromDecoup(logger) {
+        var ctx = baseStatusCtx();
+        ctx[:decoupMetric] = Signals.Metric.ok(6.0, 1.0);   // > decoupOk 5, afi still low
+        var r = StatusEvaluator.evaluate(new Config(), ctx);
+        return r[:status] == DescriptiveStrings.STATUS_BUILDING;
     }
 
     (:test)
     function testStatusDriftingFromAbsoluteAfi(logger) {
-        var cfg = new Config();
-        var ctx = baseStatusCtx();  ctx[:afi] = 70.0;   // >= afiBuilding 60
-        return StatusEvaluator.evaluate(cfg, ctx)[:status] == DescriptiveStrings.STATUS_DRIFTING;
+        var ctx = baseStatusCtx();
+        ctx[:afi] = 70.0;                        // >= afiBuilding 60
+        var r = StatusEvaluator.evaluate(new Config(), ctx);
+        return r[:status] == DescriptiveStrings.STATUS_DRIFTING;
     }
 
     (:test)
     function testStatusDriftingFromPerAthleteDrift(logger) {
         // §4.5: the absolute afiBuilding cutoff is NOT the sole gate -- per-athlete
         // AFI drift above the athlete's own baseline fires DRIFTING with a LOW afi.
-        var cfg = new Config();
-        var ctx = baseStatusCtx();  ctx[:afi] = 10.0;  ctx[:afiDrift] = 20.0; // > afiDriftMargin 15
-        return StatusEvaluator.evaluate(cfg, ctx)[:status] == DescriptiveStrings.STATUS_DRIFTING;
+        var ctx = baseStatusCtx();
+        ctx[:afi] = 10.0;
+        ctx[:afiDrift] = 20.0;                   // > afiDriftMargin 15
+        var r = StatusEvaluator.evaluate(new Config(), ctx);
+        return r[:status] == DescriptiveStrings.STATUS_DRIFTING;
     }
 
     (:test)
@@ -98,18 +109,21 @@ module CoverageTests {
         ctx[:kjWeighted] = 0.6 * cfg.kjAnchor + 1.0;           // past 0.6·kJ anchor
         ctx[:decoupMetric] = Signals.Metric.ok(9.0, 1.0);      // > decoupCaution 8
         var r = StatusEvaluator.evaluate(cfg, ctx);
-        return r[:advisoryActive] && r[:status] == DescriptiveStrings.STATUS_DRIFTING;
+        var okAdv = (r[:advisoryActive] == true);
+        var okStatus = (r[:status] == DescriptiveStrings.STATUS_DRIFTING);
+        return okAdv && okStatus;
     }
 
     (:test)
     function testStatusGatingFlags(logger) {
         // α1 not OK -> alpha1Gated ; wRr < 0.5 -> decoupOnly fallback
-        var cfg = new Config();
         var ctx = baseStatusCtx();
         ctx[:alpha1Metric] = Signals.Metric.unavailable("no rr");
         ctx[:wRr] = 0.3;
-        var r = StatusEvaluator.evaluate(cfg, ctx);
-        return r[:alpha1Gated] && r[:decoupOnly];
+        var r = StatusEvaluator.evaluate(new Config(), ctx);
+        var okGated = (r[:alpha1Gated] == true);
+        var okDecoup = (r[:decoupOnly] == true);
+        return okGated && okDecoup;
     }
 
     (:test)
@@ -118,8 +132,12 @@ module CoverageTests {
         var cfg = new Config();
         var fresh = baseStatusCtx();  fresh[:redKind] = "feat";           // still FRESH
         var drift = baseStatusCtx();  drift[:afi] = 70.0; drift[:redKind] = "feat";
-        return StatusEvaluator.evaluate(cfg, fresh)[:redKind].equals("none")
-            && StatusEvaluator.evaluate(cfg, drift)[:redKind].equals("feat");
+        // Cast to String so .equals resolves on String alone (not the Object? union).
+        var rkFresh = StatusEvaluator.evaluate(cfg, fresh)[:redKind] as Lang.String;
+        var rkDrift = StatusEvaluator.evaluate(cfg, drift)[:redKind] as Lang.String;
+        var okFresh = rkFresh.equals("none");
+        var okDrift = rkDrift.equals("feat");
+        return okFresh && okDrift;
     }
 
     // ---- CalibrationFit (R²>0.75 acceptance gate) ----
@@ -128,7 +146,10 @@ module CoverageTests {
         var g1 = CalibrationFit.fitSigmoid(null, null);
         var g2 = CalibrationFit.fitSigmoid([100.0,150.0,200.0,250.0],   // size 4 < 8
                                            [0.90,0.85,0.80,0.75]);
-        return !g1["accepted"] && near(g1["r2"], 0.0, 1e-9) && !g2["accepted"];
+        var ok1 = (g1["accepted"] == false);
+        var ok1r2 = near(g1["r2"], 0.0, 1e-9);
+        var ok2 = (g2["accepted"] == false);
+        return ok1 && ok1r2 && ok2;
     }
 
     (:test)
@@ -138,8 +159,12 @@ module CoverageTests {
         var P = []; var A = [];
         for (var p = 100; p <= 300; p += 25) { P.add(p.toFloat()); A.add(0.95 - 0.001 * p); }
         var fit = CalibrationFit.fitSigmoid(P, A);
-        return fit["accepted"] && fit["r2"] > Constants.DFA_R2_GATE
-            && near(fit["pAeT"], 200.0, 0.5) && fit["slope"] < 0.0 && fit["s"] > 0.001;
+        var okAcc = (fit["accepted"] == true);
+        var okR2 = (fit["r2"] > Constants.DFA_R2_GATE);
+        var okAet = near(fit["pAeT"], 200.0, 0.5);
+        var okSlope = (fit["slope"] < 0.0);
+        var okS = (fit["s"] > 0.001);
+        return okAcc && okR2 && okAet && okSlope && okS;
     }
 
     (:test)
@@ -147,7 +172,8 @@ module CoverageTests {
         // rising α1 with power (slope > 0) is non-physiological -> rejected even if tight
         var P = []; var A = [];
         for (var p = 100; p <= 300; p += 25) { P.add(p.toFloat()); A.add(0.5 + 0.001 * p); }
-        return !CalibrationFit.fitSigmoid(P, A)["accepted"];
+        var fit = CalibrationFit.fitSigmoid(P, A);
+        return fit["accepted"] == false;
     }
 
     (:test)
@@ -155,7 +181,8 @@ module CoverageTests {
         // near-flat fit maps to s = -4·slope/a1 below the 0.001 floor -> clamped up
         var P = []; var A = [];
         for (var p = 100; p <= 300; p += 25) { P.add(p.toFloat()); A.add(0.80 - 0.0000001 * p); }
-        return near(CalibrationFit.fitSigmoid(P, A)["s"], 0.001, 1e-9);
+        var fit = CalibrationFit.fitSigmoid(P, A);
+        return near(fit["s"], 0.001, 1e-9);
     }
 
     // ---- RingBuffer (memory-bounding invariant) ----
@@ -165,16 +192,18 @@ module CoverageTests {
         var e1 = rb.push(1); var e2 = rb.push(2); var e3 = rb.push(3);
         var e4 = rb.push(4);                 // full -> evicts oldest (1)
         var arr = rb.toArray();              // oldest -> newest
-        return e1 == null && e2 == null && e3 == null && e4 == 1
-            && rb.isFull() && rb.size() == 3
-            && arr[0] == 2 && arr[1] == 3 && arr[2] == 4 && rb.latest() == 4;
+        var okEvict = (e1 == null) && (e2 == null) && (e3 == null) && (e4 == 1);
+        var okState = (rb.isFull() == true) && (rb.size() == 3) && (rb.latest() == 4);
+        var okOrder = (arr[0] == 2) && (arr[1] == 3) && (arr[2] == 4);
+        return okEvict && okState && okOrder;
     }
 
     (:test)
     function testRingBufferEmptyState(logger) {
         var rb = new RingBuffer(4);
-        return rb.size() == 0 && !rb.isFull() && rb.capacity() == 4
-            && rb.latest() == null && rb.toArray().size() == 0;
+        var okSize = (rb.size() == 0) && (rb.isFull() == false) && (rb.capacity() == 4);
+        var okEmpty = (rb.latest() == null) && (rb.toArray().size() == 0);
+        return okSize && okEmpty;
     }
 
     (:test)
@@ -182,16 +211,19 @@ module CoverageTests {
         var rb = new RingBuffer(2);
         rb.push(9); rb.push(8); rb.push(7);  // wrapped past capacity
         rb.clear();
-        return rb.size() == 0 && rb.latest() == null && rb.toArray().size() == 0;
+        var okSize = (rb.size() == 0) && (rb.latest() == null);
+        var okArr = (rb.toArray().size() == 0);
+        return okSize && okArr;
     }
 
     // ---- MathUtil finite-safety guards ----
     (:test)
     function testSafeDivGuardsDivByZeroAndNull(logger) {
-        return near(MathUtil.safeDiv(5.0, 0.0, -1.0), -1.0, 1e-12)     // den ~0 -> fallback
-            && near(MathUtil.safeDiv(5.0, null, -1.0), -1.0, 1e-12)    // null den
-            && near(MathUtil.safeDiv(null, 2.0, -1.0), -1.0, 1e-12)    // null num
-            && near(MathUtil.safeDiv(10.0, 2.0, 0.0), 5.0, 1e-12);     // normal path
+        var okZero = near(MathUtil.safeDiv(5.0, 0.0, -1.0), -1.0, 1e-12);   // den ~0
+        var okNullDen = near(MathUtil.safeDiv(5.0, null, -1.0), -1.0, 1e-12);
+        var okNullNum = near(MathUtil.safeDiv(null, 2.0, -1.0), -1.0, 1e-12);
+        var okNormal = near(MathUtil.safeDiv(10.0, 2.0, 0.0), 5.0, 1e-12);
+        return okZero && okNullDen && okNullNum && okNormal;
     }
 
     (:test)
@@ -199,16 +231,19 @@ module CoverageTests {
         // #9-safe: use the runtime posInf() helper, never an out-of-range literal.
         var pinf = posInf();
         var ninf = -pinf;
-        return near(MathUtil.clamp(pinf, 0.0, 100.0), 100.0, 1e-6)     // +Inf-magnitude -> hi
-            && near(MathUtil.clamp(ninf, 0.0, 100.0),   0.0, 1e-6)     // -Inf-magnitude -> lo
-            && near(MathUtil.clamp(42.0, 0.0, 100.0),  42.0, 1e-6);    // in-range passthrough
+        var okHi = near(MathUtil.clamp(pinf, 0.0, 100.0), 100.0, 1e-6);   // +Inf -> hi
+        var okLo = near(MathUtil.clamp(ninf, 0.0, 100.0), 0.0, 1e-6);     // -Inf -> lo
+        var okMid = near(MathUtil.clamp(42.0, 0.0, 100.0), 42.0, 1e-6);   // passthrough
+        return okHi && okLo && okMid;
     }
 
     (:test)
     function testOlsDegenerateDenominator(logger) {
         // all-equal x -> denom = n·Σx² - (Σx)² = 0 -> safe [0,0], no divide-by-zero
         var r = MathUtil.olsSlopeR2([3.0,3.0,3.0,3.0], [1.0,2.0,3.0,4.0]);
-        return near(r[0], 0.0, 1e-12) && near(r[1], 0.0, 1e-12);
+        var okSlope = near(r[0], 0.0, 1e-12);
+        var okR2 = near(r[1], 0.0, 1e-12);
+        return okSlope && okR2;
     }
 
     (:test)
@@ -217,8 +252,9 @@ module CoverageTests {
         // stay finite and bounded (no exp overflow).
         var lo = MathUtil.fallingSigmoid(-100000.0, 200.0, 1.0, 0.5, 0.02);
         var hi = MathUtil.fallingSigmoid( 100000.0, 200.0, 1.0, 0.5, 0.02);
-        return MathUtil.isFinite(lo) && MathUtil.isFinite(hi)
-            && near(lo, 1.0, 1e-6) && near(hi, 0.5, 1e-6);
+        var okFinite = MathUtil.isFinite(lo) && MathUtil.isFinite(hi);
+        var okVals = near(lo, 1.0, 1e-6) && near(hi, 0.5, 1e-6);
+        return okFinite && okVals;
     }
 
     // ---- KalmanMath.scalarUpdate degenerate FINITE-S skip ----
@@ -231,7 +267,9 @@ module CoverageTests {
         var H = [0.0, 1.0, 0.0, 0.0];
         var r = KalmanMath.scalarUpdate(x, P, H, 100.0, 0.0);   // S = 0 -> skip
         var xn = r[0];
-        return xn[0] == 1.0 && xn[1] == 2.0 && xn[2] == 3.0 && xn[3] == 4.0;
+        var ok01 = (xn[0] == 1.0) && (xn[1] == 2.0);
+        var ok23 = (xn[2] == 3.0) && (xn[3] == 4.0);
+        return ok01 && ok23;
     }
 
     // ---- DfaAlpha1 cold-start / artifact ----
@@ -242,14 +280,17 @@ module CoverageTests {
         var few = [];
         for (var i = 0; i < 20; i++) { few.add(800.0); }   // 20 < 32
         var short = DfaAlpha1.compute(few, 4, 16);
-        return empty[0] == 0.0 && empty[2] == 0 && short[0] == 0.0 && short[2] == 0;
+        var okEmpty = (empty[0] == 0.0) && (empty[2] == 0);
+        var okShort = (short[0] == 0.0) && (short[2] == 0);
+        return okEmpty && okShort;
     }
 
     (:test)
     function testArtifactPercentTooFewBeats(logger) {
         // < 5 beats can't be trusted -> 100 % (forces α1 unavailable upstream)
-        return near(DfaAlpha1.artifactPercent([], 0.05), 100.0, 1e-6)
-            && near(DfaAlpha1.artifactPercent([800.0,800.0,800.0,800.0], 0.05), 100.0, 1e-6);
+        var okEmpty = near(DfaAlpha1.artifactPercent([], 0.05), 100.0, 1e-6);
+        var okFew = near(DfaAlpha1.artifactPercent([800.0,800.0,800.0,800.0], 0.05), 100.0, 1e-6);
+        return okEmpty && okFew;
     }
 
     (:test)
@@ -258,22 +299,26 @@ module CoverageTests {
         var clean = []; var spiked = [];
         for (var i = 0; i < 12; i++) { clean.add(800.0); spiked.add(800.0); }
         spiked[6] = 1600.0;
-        return near(DfaAlpha1.artifactPercent(clean, 0.05), 0.0, 1e-6)
-            && DfaAlpha1.artifactPercent(spiked, 0.05) > 0.0;
+        var okClean = near(DfaAlpha1.artifactPercent(clean, 0.05), 0.0, 1e-6);
+        var okSpike = (DfaAlpha1.artifactPercent(spiked, 0.05) > 0.0);
+        return okClean && okSpike;
     }
 
     // ---- TrainingLoadLedger guard paths ----
     (:test)
     function testTrimpGuardsHrMaxEqualsHrRest(logger) {
         // degenerate HR span (hrMax == hrRest) -> 0, no divide-by-zero
-        return near(TrainingLoadLedger.trimpIncrement(150.0, 150.0, 150.0, 60.0, 0.64, 1.92), 0.0, 1e-12);
+        var t = TrainingLoadLedger.trimpIncrement(150.0, 150.0, 150.0, 60.0, 0.64, 1.92);
+        return near(t, 0.0, 1e-12);
     }
 
     (:test)
     function testTssWithZeroFtp(logger) {
         // ftp == 0 -> IF via safeDiv falls back to 0 -> TSS 0, finite (never NaN)
         var tss = TrainingLoadLedger.tss(3600, 200.0, 0.0);
-        return near(tss, 0.0, 1e-9) && MathUtil.isFinite(tss);
+        var okZero = near(tss, 0.0, 1e-9);
+        var okFinite = MathUtil.isFinite(tss);
+        return okZero && okFinite;
     }
 
     // ---- AcuteFatigueFilter.step null-sensor (review item 5) ----
@@ -287,10 +332,11 @@ module CoverageTests {
         for (var i = 0; i < 30; i++) {
             filt.step(null, null, null, 0.0, 0.2, false, true); // no power, no HR, no α1
         }
-        return MathUtil.isFinite(filt.latentHr())
-            && MathUtil.isFinite(filt.fState())
-            && MathUtil.isFinite(filt.afiKalman())
-            && MathUtil.isFinite(filt.latentA1())
-            && !filt.isDegraded();
+        var okHr = MathUtil.isFinite(filt.latentHr());
+        var okF = MathUtil.isFinite(filt.fState());
+        var okAfi = MathUtil.isFinite(filt.afiKalman());
+        var okA1 = MathUtil.isFinite(filt.latentA1());
+        var okClean = (filt.isDegraded() == false);
+        return okHr && okF && okAfi && okA1 && okClean;
     }
 }
