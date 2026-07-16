@@ -31,13 +31,19 @@ LOG="sim-run.log"
 # HOME at wherever the sim device defs actually live so the sim can load
 # "$DEVICE". Search the likely homes first, then fall back to a full scan.
 if [ ! -e "$HOME/.Garmin/ConnectIQ/Devices/${DEVICE}/compiler.json" ]; then
+  # `-print -quit` stops find at the first match WITHOUT a `| head` pipe -- a
+  # `find | head` pipeline SIGPIPEs find, and under `set -o pipefail`/`set -e`
+  # that aborts the whole script with exit 141 (PR #43 run 30). Wrap in set +e
+  # so a missing search root's non-zero exit can't trip errexit either.
+  set +e
   cj="$(find /root /home /github /connectiq -maxdepth 8 -name compiler.json \
-          -path '*/.Garmin/ConnectIQ/Devices/*' 2>/dev/null | head -1)"
+          -path '*/.Garmin/ConnectIQ/Devices/*' -print -quit 2>/dev/null)"
   [ -n "$cj" ] || cj="$(find / -maxdepth 9 -name compiler.json \
-          -path '*/.Garmin/ConnectIQ/Devices/*' 2>/dev/null | head -1)"
+          -path '*/.Garmin/ConnectIQ/Devices/*' -print -quit 2>/dev/null)"
+  set -e
   if [ -n "$cj" ]; then
     export HOME="${cj%/.Garmin/ConnectIQ/Devices/*}"
-    echo "note: sim HOME set to $HOME (device defs found at ${cj%/*/compiler.json})"
+    echo "note: sim HOME set to $HOME (device defs found)"
   else
     echo "::warning::no ConnectIQ sim device defs found on the image; the run will fail"
   fi
