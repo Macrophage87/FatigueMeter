@@ -71,6 +71,22 @@ module Constants {
     const C_F = 0.0167;      // α1<-F coupling: F=F_ref(12) pulls α1 ~0.2 below predicted -> 0.2/12
     const F_REF = 12.0;      // AFI scale ref (bpm) — AFI linear in 1/F_ref (§4.5)
 
+    // ---- Sanity bounds (convention / engineering glitch-rejection, §9) ----
+    // These are NOT physiological anchors: they only keep sensor garbage out of
+    // the filter so one bad sample can't corrupt the ride (#23). Traceability
+    // rows flag them convention/glitch-rejection, not a VO2/FTP claim.
+    // Absolute ceiling on one power sample. 3000 W sits unambiguously above any
+    // human sprint peak (even elite track sprinters top out ~2000-2500 W for
+    // <1 s), so it never clips a real effort; it exists only to reject dropouts
+    // that report 0/negative or a 65535-style spike before they enter the filter
+    // input u.
+    const POWER_SANITY_MAX = 3000.0;   // W
+    // Plausible latent-HR clamp band for x[S_HR]. Floor well below any resting HR;
+    // the ceiling used in code is hrMax + HR_STATE_MARGIN, so a genuine max effort
+    // is never clipped but a spike/NaN cannot leave latentHr() unbounded.
+    const HR_STATE_MIN = 20.0;         // bpm
+    const HR_STATE_MARGIN = 15.0;      // bpm above hrMax
+
     // Process / measurement noise (hand-set; no ground truth to tune against)
     const Q_HR = 0.5;
     const Q_HRLAT = 0.5;

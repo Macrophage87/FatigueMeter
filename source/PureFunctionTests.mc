@@ -553,6 +553,62 @@ module PureFunctionTests {
             && MathUtil.isFinite(filt.latentA1());
     }
 
+    // ------------------------------------------- Filter sanity bounds (#23)
+    // Three isolated failure paths: setConfig must refresh the cached
+    // observability Gramian on a mid-ride reload; one spurious-but-finite power
+    // spike must not saturate F/AFI; and the latent HR states must stay bounded
+    // (and self-heal) through a long HR dropout at high finite power.
+
+    (:test)
+    function testSetConfigRecomputesObservability(logger) {
+        // #23: a mid-ride settings reload must refresh the cached observability
+        // Gramian (A depends on tauHr). On unpatched code setConfig only swaps
+        // cfg, so det stays == det0 from initState.
+        var cfg = new Config();
+        var filt = new AcuteFatigueFilter(cfg);
+        filt.step(200.0, 130.0, null, 0.0, 0.2, true, true);   // init -> obs cached
+        var det0 = filt.observabilityDetGram();
+        var cfg2 = new Config();
+        cfg2.tauHr = 5.0;                                       // was 30 -> A changes
+        filt.setConfig(cfg2);
+        var det1 = filt.observabilityDetGram();
+        return det1 > 0.0 && !near(det0, det1, 1e-6);           // recomputed, still observable
+    }
+
+    (:test)
+    function testPowerSpikeDoesNotSaturateFatigue(logger) {
+        // #23: one absurd spurious power sample (> POWER_SANITY_MAX) must not pin
+        // F (hence AFI) high. Unpatched: charge is huge in this single step ->
+        // AFI pinned well above the 50 threshold (~72 at 60000 W, climbing to 100
+        // as F saturates on repeats). The clamp keeps this step's AFI near zero.
+        var cfg = new Config();
+        var filt = new AcuteFatigueFilter(cfg);
+        filt.step(60000.0, 150.0, null, 0.0, 0.2, true, true); // bad sensor spike
+        return filt.afiKalman() < 50.0
+            && filt.latentHr() <= cfg.hrMax + Constants.HR_STATE_MARGIN + 1.0;
+    }
+
+    (:test)
+    function testLatentHrClampedThroughDropout(logger) {
+        // #23: a high power UNDER the sanity cap (1500 < POWER_SANITY_MAX, so this
+        // isolates the HR-state clamp, not the power clamp) must not let
+        // latentHr() run away and must stay bounded through a long predict-only HR
+        // dropout. Unpatched: x[S_HR] drifts toward hrSsInput (~725) with no HR
+        // measurement to pull it back.
+        var cfg = new Config();
+        var filt = new AcuteFatigueFilter(cfg);
+        for (var i = 0; i < 30; i++) {
+            filt.step(1500.0, 175.0, null, 0.0, 0.2, true, true);
+        }
+        var live = filt.latentHr();
+        for (var j = 0; j < 120; j++) {
+            filt.step(1500.0, null, null, 0.0, 0.2, true, true);  // HR missing
+        }
+        var dropout = filt.latentHr();
+        var ceil = cfg.hrMax + Constants.HR_STATE_MARGIN + 1.0;
+        return live <= ceil && dropout <= ceil && dropout > cfg.hrRest;
+    }
+
     // ----------------------------------------------------------- Metric (#21)
     // The Metric "never carries NaN/Inf" invariant (§8.4): a non-finite value is
     // dropped to null + AVAIL_UNAVAILABLE at the single construction choke point,
