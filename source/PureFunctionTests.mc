@@ -224,11 +224,21 @@ module PureFunctionTests {
         // §4.4 / harness: on a coast (inactive, low power) F must NOT increase.
         var cfg = new Config();
         var filt = new AcuteFatigueFilter(cfg);
-        // charge F up first with an active hard effort
+        // Charge F up first with an active hard effort. F is the residual HR
+        // drift ABOVE the fresh-HR prediction (hrRest + gP*power ~= 170 bpm at
+        // this power), so the measured HR must EXCEED that prediction for F to
+        // build -- 160 bpm sits below it, keeps the innovation negative, and F
+        // never charges (F stays 0, so the coast assertion is vacuously false).
+        // Use 185 bpm (below hrMax 190): a physiologically consistent hard effort
+        // that genuinely accumulates fatigue drift (surfaced by the #42 test run).
         for (var i = 0; i < 300; i++) {
-            filt.step(cfg.pAeT + 80.0, 160.0, null, 100.0, 0.0, true, true);
+            filt.step(cfg.pAeT + 80.0, 185.0, null, 100.0, 0.0, true, true);
         }
         var fCharged = filt.fState();
+        // Guard against a silently-vacuous test: F MUST have actually charged, or
+        // `fState() < fCharged` could pass/fail for the wrong reason if a future
+        // gP/hrRest/pAeT change lifts the fresh-HR prediction back above 185 bpm.
+        if (!(fCharged > 0.0)) { return false; }
         // now coast: inactive, no power, and HR dropped out (predict-only) so the
         // test isolates the charge/decay dynamics from the HR-innovation confound.
         // κ_d is gated off (inactive) -> F must decay via τ_rec.
@@ -453,9 +463,12 @@ module PureFunctionTests {
         var x = [0.0, 100.0, 0.75, 0.0];
         var P = KalmanMath.zeros4x4();
         P[1][1] = 25.0;
-        P[0][3] = inf; P[3][0] = inf;   // off-diagonal poison OUTSIDE the H column -> S stays finite
+        // Off-diagonal Inf. In scalarUpdate PHt[0] += P[0][3]*H[3] = Inf*0 = NaN,
+        // so S = NaN and the degenerate/non-finite S guard FIRES -- it is that
+        // guard path's scrub (symmetrize a copy of P) that must return a finite P.
+        P[0][3] = inf; P[3][0] = inf;
         var H = [0.0, 1.0, 0.0, 0.0];
-        var r = KalmanMath.scalarUpdate(x, P, H, 120.0, 4.0);   // proceeds; symmetrize at :81 scrubs
+        var r = KalmanMath.scalarUpdate(x, P, H, 120.0, 4.0);   // S=NaN -> guard scrubs P before skip
         return KalmanMath.isFiniteMatrix(r[1]) && KalmanMath.isFiniteVector(r[0]);
     }
 

@@ -63,7 +63,14 @@ module KalmanMath {
         // S = H·PHt + R
         var S = R;
         for (var i = 0; i < 4; i++) { S += H[i] * PHt[i]; }
-        if (!MathUtil.isFinite(S) || S < 1.0e-9) { return [x, P]; }   // degenerate/non-finite; skip safely
+        if (!MathUtil.isFinite(S) || S < 1.0e-9) {
+            // Degenerate/non-finite innovation covariance: skip the channel. Scrub
+            // P before returning -- a non-finite P entry (e.g. an off-diagonal Inf
+            // makes PHt = Inf*0 = NaN, so S = NaN and we land here) must NOT leak
+            // out unscrubbed; that was the one path bypassing the #8 finite-scrub
+            // (surfaced by the #42 test run). copy4x4 so we never mutate the caller's P.
+            return [x, symmetrize(KalmanMath.copy4x4(P))];
+        }
         // Hx
         var Hx = 0.0;
         for (var i = 0; i < 4; i++) { Hx += H[i] * x[i]; }

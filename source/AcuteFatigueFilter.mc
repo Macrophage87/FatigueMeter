@@ -352,16 +352,18 @@ class AcuteFatigueFilter {
     // =====================================================================
     //  TEST-SUPPORT ONLY  (issue #8 self-heal RESET-branch coverage)
     // =====================================================================
-    //! The `(:test)` annotation excludes this from release/production builds
-    //! (only compiled under the unit-test target `-t`, like the tests themselves).
-    //! It exists solely to make the self-heal RESET branch in step() reachable:
+    //! Test-only seam to make the self-heal RESET branch in step() reachable:
     //! with finite inputs the public API keeps x finite by construction (the
     //! clamps + finite-power gate hold), so the `degraded=true` + x-scrub path
-    //! cannot be driven end-to-end. This seam pokes a non-finite value straight
-    //! into the hidden state x and marks the filter initialized so the next
-    //! step() propagates it, trips the finite check, and self-heals. It performs
-    //! NO filtering itself and must never be called from shipping code.
-    (:test)
+    //! cannot be driven end-to-end. This pokes a non-finite value straight into
+    //! the hidden state x and marks the filter initialized so the next step()
+    //! propagates it, trips the finite check, and self-heals. It performs NO
+    //! filtering itself and must never be called from shipping code.
+    //!
+    //! NOTE: deliberately NOT annotated `(:test)`. `(:test)` marks a *unit test*,
+    //! so the runner would invoke this two-argument helper with a single logger
+    //! arg -> "Not Enough Arguments" ERROR (surfaced once the tests actually ran,
+    //! see #42). It is a plain (tiny, never-called-in-release) helper instead.
     function debugInjectNonFiniteState(index, value) {
         initialized = true;
         x[index] = value;
