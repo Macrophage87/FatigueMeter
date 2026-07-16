@@ -571,8 +571,9 @@ module PureFunctionTests {
     (:test)
     function testPowerSpikeDoesNotSaturateFatigue(logger) {
         // #23: one absurd spurious power sample (> POWER_SANITY_MAX) must not pin
-        // F (hence AFI) to the 3*fRef saturation. Unpatched: charge is huge ->
-        // F clamps -> afi == 100.
+        // F (hence AFI) high. Unpatched: charge is huge in this single step ->
+        // AFI pinned well above the 50 threshold (~72 at 60000 W, climbing to 100
+        // as F saturates on repeats). The clamp keeps this step's AFI near zero.
         var cfg = new Config();
         var filt = new AcuteFatigueFilter(cfg);
         filt.step(60000.0, 150.0, null, 0.0, 0.2, true, true); // bad sensor spike

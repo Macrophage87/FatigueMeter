@@ -75,11 +75,12 @@ module Constants {
     // These are NOT physiological anchors: they only keep sensor garbage out of
     // the filter so one bad sample can't corrupt the ride (#23). Traceability
     // rows flag them convention/glitch-rejection, not a VO2/FTP claim.
-    // Absolute ceiling on one power sample. Sits well above any human sprint peak
-    // (~2000-2500 W for <1 s), so it never clips a real effort; it exists only to
-    // reject dropouts that report 0/negative or a 65535-style spike before they
-    // enter the filter input u.
-    const POWER_SANITY_MAX = 2000.0;   // W
+    // Absolute ceiling on one power sample. 3000 W sits unambiguously above any
+    // human sprint peak (even elite track sprinters top out ~2000-2500 W for
+    // <1 s), so it never clips a real effort; it exists only to reject dropouts
+    // that report 0/negative or a 65535-style spike before they enter the filter
+    // input u.
+    const POWER_SANITY_MAX = 3000.0;   // W
     // Plausible latent-HR clamp band for x[S_HR]. Floor well below any resting HR;
     // the ceiling used in code is hrMax + HR_STATE_MARGIN, so a genuine max effort
     // is never clipped but a spike/NaN cannot leave latentHr() unbounded.
