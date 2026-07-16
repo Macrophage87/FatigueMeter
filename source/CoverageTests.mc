@@ -502,7 +502,7 @@ module CoverageTests {
         var legacy = { "date" => 1, "durationS" => 3600, "tss" => 50.0 };
         var migrated = SessionStore.migrate(legacy) as Lang.Dictionary;
         var okValid = (SessionStore.isValidRecord(migrated) == true);
-        var okStamped = (migrated["_v"] == SessionStore.SCHEMA);
+        var okStamped = (migrated["_v"] == SessionSchema.VERSION);
         return okValid && okStamped;
     }
 
@@ -513,7 +513,7 @@ module CoverageTests {
         var okString = (SessionStore.isValidRecord("nope") == false);
         var okNumber = (SessionStore.isValidRecord(42) == false);
         var okNull   = (SessionStore.isValidRecord(null) == false);
-        var noKeys   = { "_v" => SessionStore.SCHEMA };            // no date/durationS
+        var noKeys   = { "_v" => SessionSchema.VERSION };            // no date/durationS
         var okNoKeys = (SessionStore.isValidRecord(noKeys) == false);
         var wrongV   = { "_v" => 999, "date" => 1, "durationS" => 10 };
         var okWrongV = (SessionStore.isValidRecord(wrongV) == false);
@@ -526,7 +526,7 @@ module CoverageTests {
         // add() -- a heterogeneous literal (dicts + a string + null) would force the
         // type-checker to compute a wide value-type overlap (the #14 shape to avoid).
         var raw = [];
-        raw.add({ "_v" => SessionStore.SCHEMA, "date" => 1, "durationS" => 10 }); // valid
+        raw.add({ "_v" => SessionSchema.VERSION, "date" => 1, "durationS" => 10 }); // valid
         raw.add({ "date" => 2, "durationS" => 20 });          // unversioned -> migrated in
         raw.add("garbage");                                   // non-dict -> dropped
         raw.add(null);                                        // null -> dropped
@@ -553,7 +553,7 @@ module CoverageTests {
             "moderate", 5.0);
         var okValid = (SessionStore.isValidRecord(r) == true);
         var rd = r as Lang.Dictionary;
-        var okVersion = (rd["_v"] == SessionStore.SCHEMA);
+        var okVersion = (rd["_v"] == SessionSchema.VERSION);
         return okValid && okVersion;
     }
 }

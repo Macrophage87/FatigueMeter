@@ -3,6 +3,24 @@ using Toybox.Application.Storage;
 using Toybox.Time;
 using Toybox.System;
 
+//! Session Result schema version, in its own module so it is reachable by a
+//! module-qualified name (SessionSchema.VERSION) from SessionStore's static
+//! helpers AND from the unit tests. A class-scope `const` is NOT accessible via
+//! `ClassName.CONST` in Monkey C (the compiler can't find the symbol), so the
+//! version lives here instead.
+//!
+//! CONTRACT — bumping VERSION to N REQUIRES adding a v(N-1)->vN upgrade step in
+//! SessionStore.migrate() (and, for a multi-version jump, every intermediate
+//! step). isValidRecord demands `_v == VERSION` EXACTLY, so any existing record
+//! migrate() does not carry up to the new VERSION is silently dropped on the next
+//! load() — i.e. a bump WITHOUT a matching migrate() step wipes the entire ride
+//! history. migrate() today only stamps *unversioned* (pre-`_v`) records; it has
+//! no version-stepping path yet, so VERSION must not be bumped until that path is
+//! added there.
+module SessionSchema {
+    const VERSION = 1;
+}
+
 //! SessionStore — persistent compact Session Results + rolling history (white
 //! paper §8.3). Enables the cross-ride comparison view ("feat-of-strength day vs
 //! attrition day"). Each append persists the whole history under a single key
@@ -10,19 +28,6 @@ using Toybox.System;
 //! elements dropped, unversioned records migrated) so a partially-written or
 //! foreign value can never corrupt the in-memory list (#18).
 class SessionStore {
-
-    //! Session Result schema version. Bumped when buildResult's shape changes;
-    //! read-side migrate()/isValidRecord() gate on it so a stale-shaped record is
-    //! upgraded or dropped rather than trusted.
-    //!
-    //! CONTRACT — bumping SCHEMA to N REQUIRES adding a v(N-1)->vN upgrade step in
-    //! migrate() (and, for a multi-version jump, every intermediate step). isValidRecord
-    //! demands `_v == SCHEMA` EXACTLY, so any existing record migrate() does not
-    //! carry up to the new SCHEMA is silently dropped on the next load() — i.e. a
-    //! bump WITHOUT a matching migrate() step wipes the entire ride history. migrate()
-    //! today only stamps *unversioned* (pre-`_v`) records; it has no version-stepping
-    //! path yet, so SCHEMA must not be bumped until that path is added here.
-    const SCHEMA = 1;
 
     hidden const KEY = "fm_sessions_v1";
     hidden const KEY_BAK = "fm_sessions_v1_bak";   // retired; deleted once on load
@@ -100,16 +105,16 @@ class SessionStore {
     //! "_v" stamp, so treat it as the current schema. Non-dictionaries pass
     //! through unchanged (isValidRecord will reject them).
     //!
-    //! IMPORTANT (see the SCHEMA const contract): this only handles the
-    //! unversioned->current case. When SCHEMA is bumped, add explicit
+    //! IMPORTANT (see the SessionSchema.VERSION contract): this only handles the
+    //! unversioned->current case. When VERSION is bumped, add explicit
     //! v(n)->v(n+1) upgrade steps HERE for every prior version, otherwise
-    //! isValidRecord's exact `_v == SCHEMA` check drops every un-upgraded record
+    //! isValidRecord's exact `_v == VERSION` check drops every un-upgraded record
     //! on the next load() and the whole history is lost.
     static function migrate(rec) {
         if (!(rec instanceof Lang.Dictionary)) { return rec; }
         var d = rec as Lang.Dictionary;
-        if (!d.hasKey("_v")) { d.put("_v", SessionStore.SCHEMA); }
-        // (no v(n)->v(n+1) steps needed while SCHEMA == 1)
+        if (!d.hasKey("_v")) { d.put("_v", SessionSchema.VERSION); }
+        // (no v(n)->v(n+1) steps needed while VERSION == 1)
         return d;
     }
 
@@ -118,7 +123,7 @@ class SessionStore {
     static function isValidRecord(rec) {
         if (!(rec instanceof Lang.Dictionary)) { return false; }
         var d = rec as Lang.Dictionary;
-        if (d["_v"] != SessionStore.SCHEMA) { return false; }
+        if (d["_v"] != SessionSchema.VERSION) { return false; }
         return d.hasKey("date") && d.hasKey("durationS");
     }
 
@@ -133,7 +138,7 @@ class SessionStore {
                                 best1, best5, best20, matches, durabilityKj,
                                 endBucket, fatigueBandPts) {
         return {
-            "_v" => SessionStore.SCHEMA,
+            "_v" => SessionSchema.VERSION,
             "date" => date, "durationS" => durationS, "tss" => tss,
             "endFatigue" => endFatigue, "peakAfi" => peakAfi,
             "endBucket" => endBucket, "fatigueBandPts" => fatigueBandPts,
