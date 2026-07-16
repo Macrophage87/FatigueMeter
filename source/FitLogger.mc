@@ -1,5 +1,6 @@
 using Toybox.Lang;
 using Toybox.FitContributor;
+using Toybox.System;
 
 //! FitLogger — in-ride time series + session summary via the Connect IQ
 //! FitContributor API (white paper §8.3). Record-message developer fields flow
@@ -34,10 +35,22 @@ class FitLogger {
         try {
             createRecordFields(dataField);
             createSessionFields(dataField);
-            ok = true;
         } catch (e) {
-            ok = false;   // logging unavailable; app still runs
+            System.println("FitLogger: field creation aborted; logging degraded");
         }
+        // Derive availability from what was actually created, not from an
+        // exception-free run: mkRec/mkSes swallow their own createField failures
+        // (a single rejected field must not abort the rest), so a partial success
+        // has to keep logging enabled for the fields that did register. Deriving
+        // from the dict sizes makes that rule honest and unit-testable (#20).
+        ok = deriveOk(rec.size(), ses.size());
+    }
+
+    //! Logging is available if at least one developer field — record or session —
+    //! was created. Pure so the partial-success rule is (:test)-drivable without
+    //! a real DataField (#20).
+    static function deriveOk(recSize, sesSize) {
+        return (recSize > 0) || (sesSize > 0);
     }
 
     hidden function mkRec(df, id, label, units) {
@@ -45,7 +58,9 @@ class FitLogger {
             var f = df.createField(label, id, FitContributor.DATA_TYPE_FLOAT,
                 { :mesgType => FitContributor.MESG_TYPE_RECORD, :units => units });
             rec[id] = f;
-        } catch (e) { }
+        } catch (e) {
+            System.println("FitLogger: record field '" + label + "' unavailable");
+        }
     }
 
     hidden function mkSes(df, id, label, units) {
@@ -53,7 +68,9 @@ class FitLogger {
             var f = df.createField(label, id, FitContributor.DATA_TYPE_FLOAT,
                 { :mesgType => FitContributor.MESG_TYPE_SESSION, :units => units });
             ses[id] = f;
-        } catch (e) { }
+        } catch (e) {
+            System.println("FitLogger: session field '" + label + "' unavailable");
+        }
     }
 
     hidden function createRecordFields(df) {
@@ -92,8 +109,12 @@ class FitLogger {
         }
     }
 
-    //! Log one record (called at ~1 Hz from compute()). Any null/absent value is
-    //! simply skipped — a missing sensor never blocks logging of the rest.
+    //! Log one record (called at ~1 Hz from compute()). A null/non-finite input
+    //! leaves that field unset for this record; under the FitContributor
+    //! developer-field encoding an unset field carries its previous value
+    //! forward, so a dropped sensor reads as a held (flat) value rather than a
+    //! true gap (see issue #20). A missing sensor never blocks logging of the
+    //! other fields.
     function logRecord(afi, f, decoup, a1, wbal, kjw, feat, attr) {
         if (!ok) { return; }
         setRec(FLD_AFI, afi);

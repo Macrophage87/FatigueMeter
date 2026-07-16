@@ -141,7 +141,7 @@ jobs:
   # pre-existing sim at entry as a belt-and-suspenders guard.
   #
   # REQUIRED (#42): promoted after a confirmed genuinely-green run (single Xvfb/
-  # sim, ran==passed==expected, failed==0, errors==0; 47/47). No continue-on-error;
+  # sim, ran==passed==expected, failed==0, errors==0; 105/105). No continue-on-error;
   # in ci-required.needs. A test failure, a dropped count, or zero tests run now
   # blocks merges. NOTE: this executes a headless Qt sim -- if it ever flakes it
   # can block merges until re-run; re-run the job, and if a genuine flake pattern

@@ -21,7 +21,10 @@ using Toybox.Math;
 //! INCLUDING EffortCharacterizer's featScore/attritionScore pure statics (added
 //! below). What remains genuinely needs hardware or an integration harness, NOT
 //! this pure suite: AntHrm channel lifecycle (its pure shouldReopen predicate IS
-//! covered in PureFunctionTests), FitLogger (FitContributor), SessionStore +
+//! covered in PureFunctionTests), FitLogger's FitContributor field creation +
+//! setData (its pure deriveOk partial-success rule IS covered below, #20),
+//! SessionStore's Storage-backed load/append/persist (its pure sanitize / migrate
+//! / isValidRecord / buildResult validators ARE covered below, #18) +
 //! CalibrationFit.save/load (Application.Storage), FatigueMeterApp and the
 //! WatchUi-rendering parts of FatigueMeterView (its defaultSnapshot IS already
 //! covered by testViewDefaultSnapshotIsConservative), and DescriptiveStrings
@@ -471,5 +474,86 @@ module CoverageTests {
         ctx[:decoupMetric] = Signals.Metric.ok(9.0, 1.0);  // > decoupCaution
         var r = StatusEvaluator.evaluate(new Config(), ctx);
         return r[:advisoryActive] == false;
+    }
+
+    // ---- FitLogger.deriveOk partial-success rule (#20) ----
+    // FitLogger.initialize derives `ok` from how many developer fields actually
+    // got created, not from an exception-free run, so a PARTIAL success still logs
+    // the fields that registered. This is the pure decision, unit-testable without
+    // a real DataField / FitContributor.
+    (:test)
+    function testDeriveOkTruthTable(logger) {
+        var okNone = (FitLogger.deriveOk(0, 0) == false);   // nothing created -> off
+        var okRec  = (FitLogger.deriveOk(8, 0) == true);    // record fields only -> on
+        var okSes  = (FitLogger.deriveOk(0, 6) == true);    // session fields only -> on
+        var okBoth = (FitLogger.deriveOk(8, 6) == true);    // both -> on
+        return okNone && okRec && okSes && okBoth;
+    }
+
+    // ---- SessionStore record-integrity validators (#18) ----
+    // The Storage-backed load/append/persist can't run in the pure harness, but the
+    // sanitize/migrate/isValidRecord/buildResult statics that keep a foreign or
+    // partially-written value from corrupting the history are pure and covered here.
+
+    (:test)
+    function testStoreMigratesUnversioned(logger) {
+        // A legacy record predates the "_v" stamp; migrate() upgrades it in place so
+        // it validates -- history written before the schema stamp isn't discarded.
+        var legacy = { "date" => 1, "durationS" => 3600, "tss" => 50.0 };
+        var migrated = SessionStore.migrate(legacy) as Lang.Dictionary;
+        var okValid = (SessionStore.isValidRecord(migrated) == true);
+        var okStamped = (migrated["_v"] == SessionSchema.VERSION);
+        return okValid && okStamped;
+    }
+
+    (:test)
+    function testStoreRejectsMalformed(logger) {
+        // Non-dictionaries, dicts missing a structural key, and wrong-schema dicts
+        // are all rejected, so a foreign/partial value can't enter the history.
+        var okString = (SessionStore.isValidRecord("nope") == false);
+        var okNumber = (SessionStore.isValidRecord(42) == false);
+        var okNull   = (SessionStore.isValidRecord(null) == false);
+        var noKeys   = { "_v" => SessionSchema.VERSION };            // no date/durationS
+        var okNoKeys = (SessionStore.isValidRecord(noKeys) == false);
+        var wrongV   = { "_v" => 999, "date" => 1, "durationS" => 10 };
+        var okWrongV = (SessionStore.isValidRecord(wrongV) == false);
+        return okString && okNumber && okNull && okNoKeys && okWrongV;
+    }
+
+    (:test)
+    function testStoreSanitizeDropsBadElements(logger) {
+        // sanitize() migrates the valid, drops the rest. Build the mixed array via
+        // add() -- a heterogeneous literal (dicts + a string + null) would force the
+        // type-checker to compute a wide value-type overlap (the #14 shape to avoid).
+        var raw = [];
+        raw.add({ "_v" => SessionSchema.VERSION, "date" => 1, "durationS" => 10 }); // valid
+        raw.add({ "date" => 2, "durationS" => 20 });          // unversioned -> migrated in
+        raw.add("garbage");                                   // non-dict -> dropped
+        raw.add(null);                                        // null -> dropped
+        raw.add({ "date" => 3 });                             // missing durationS -> dropped
+        var clean = SessionStore.sanitize(raw);
+        var okCount = (clean.size() == 2);
+        // Assert the RIGHT two survived in order (valid date=1, migrated date=2),
+        // not merely that two elements remain -- a bug that kept the wrong pair
+        // would still pass a bare size() check.
+        var r0 = clean[0] as Lang.Dictionary;
+        var r1 = clean[1] as Lang.Dictionary;
+        var okKept = (r0["date"] == 1) && (r1["date"] == 2);
+        return okCount && okKept;
+    }
+
+    (:test)
+    function testStoreBuildResultIsValidAndVersioned(logger) {
+        // The write path (buildResult) and the read-side validator (isValidRecord)
+        // agree: a freshly built Session Result is stamped with the current schema.
+        var r = SessionStore.buildResult(
+            1, 3600, 55.0, 8.0, 42.0,
+            120.0, 0.0, 3.0, 1.0,
+            400.0, 320.0, 280.0, 2, 1800.0,
+            "moderate", 5.0);
+        var okValid = (SessionStore.isValidRecord(r) == true);
+        var rd = r as Lang.Dictionary;
+        var okVersion = (rd["_v"] == SessionSchema.VERSION);
+        return okValid && okVersion;
     }
 }

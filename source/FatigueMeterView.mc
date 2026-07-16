@@ -52,6 +52,7 @@ class FatigueMeterView extends WatchUi.DataField {
     hidden var dRedKind;
     hidden var dPowerAvail;
     hidden var dStationary;
+    hidden var dWriteFailed;   // last session append could not persist (#18); footer surfacing tracked with #28
 
     //! Conservative NODATA defaults written at construction BEFORE the guarded
     //! collaborator build (§8.4, #13): if that build throws, the field is left on
@@ -85,6 +86,7 @@ class FatigueMeterView extends WatchUi.DataField {
         tick = 0;
         seeded = false;
         finalized = false;
+        dWriteFailed = false;
         peakAfi = 0.0;
         lastFreshMatchCount = 0;
 
@@ -349,7 +351,10 @@ class FatigueMeterView extends WatchUi.DataField {
             effort.best1(), effort.best5(), effort.best20(),
             effort.matchesBurned(), prims.kjWeightedValue(),
             driftBucketLbl, filter.afiUncertainty());
-        sessions.append(result);
+        // append() keeps the record in the in-memory history even if the durable
+        // write fails; capture the outcome so a "not saved" affordance can surface
+        // it (footer rendering coordinated with #28).
+        dWriteFailed = !sessions.append(result);
     }
 
     // =====================================================================
