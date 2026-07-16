@@ -115,6 +115,83 @@ jobs:
           [ "$rc" = 0 ] && echo "unit-test build OK (all devices)"
           exit "$rc"
 
+  # --------------------------------------------------- run unit tests (advisory)
+  # Runtime gate (#42): actually EXECUTE the (:test) functions, not just compile.
+  # SEPARATE from the compile gate so a simulator flake never masks a compile
+  # regression. It compiles edge1050 --unit-test (pure/device-independent tests;
+  # the compile job already covers all 8 devices), then runs it via
+  # scripts/run_ciq_tests.sh, whose bounded simulator-READINESS PROBE + hard
+  # `timeout` make it fail-FAST rather than hang the way the image's tester.sh
+  # does (the failure that made #40's run unusable). The strict fail-closed
+  # parser (scripts/check_ciq_tests.py) never trusts the runner exit code.
+  #
+  # DIAGNOSTIC-FIRST: a one-time step captures the sim's real launch/IPC-port/
+  # process name and the runner's output format into the run log, so the parser
+  # patterns and CIQ_SIM_PORT/CIQ_SIM_PROC can be pinned exactly. It runs on a
+  # SEPARATE display (:98) with its own trap-cleanup so it cannot leak an Xvfb/
+  # sim server into the run step's :99 (which itself fails-fast if :99/the port
+  # is already busy at entry).
+  #
+  # ADVISORY (`continue-on-error: true`, NOT in `ci-required.needs`). Promote to
+  # REQUIRED only after the first run is confirmed genuinely green (single Xvfb/
+  # sim, ran==passes==41, failed==0) and the diagnostic values are pinned -- see
+  # #42. Until then it can never wedge `main`.
+  simulate:
+    name: Run unit tests (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    container:
+      # Same digest-pinned image as the compile gate (SDK 9.2.0). The digest IS
+      # the pin; the tag comment is informational.
+      image: ghcr.io/matco/connectiq-tester@sha256:7a6f586cb0e0393ff288da09cf27b6dad40a0058a346c529b99fd0fc19858f0f   # v2.8.0 = SDK 9.2.0
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+      - name: Ensure tools present (guarded, like the compile job's openssl)
+        run: |
+          set -eux
+          need() { command -v "$1" >/dev/null 2>&1; }
+          if need openssl && need Xvfb && need xdpyinfo && need ss && need pgrep; then exit 0; fi
+          apt-get update
+          apt-get install -y openssl xvfb x11-utils iproute2 procps
+      - name: DIAGNOSTIC (one-time) — pin CIQ_SIM_PORT / CIQ_SIM_PROC / runner format
+        # Runs on its OWN display :98 with a trap that reaps its Xvfb + sim, so it
+        # can never leak a server into the run step's :99 / sim port. Once the
+        # values below are pinned from this output, this step (and the tool
+        # fallback) are removed and the parser patterns are anchored exactly.
+        run: |
+          set -eux
+          echo "== tester.sh (how the image launches the sim) =="
+          cat /connectiq/bin/tester.sh || true
+          export DISPLAY=:98
+          Xvfb :98 -screen 0 1280x1024x24 >/dev/null 2>&1 &
+          XPID=$!
+          trap 'pkill -f "onnect|imulator" 2>/dev/null || true; kill "$XPID" 2>/dev/null || true' EXIT
+          sleep 3
+          connectiq >/dev/null 2>&1 &
+          sleep 15
+          echo "== listening ports (pin CIQ_SIM_PORT) =="
+          ss -ltnp || true
+          echo "== sim processes (pin CIQ_SIM_PROC) =="
+          pgrep -af 'onnect|imulator' || true
+      - name: Compile --unit-test (edge1050)
+        run: |
+          set -eux
+          openssl genrsa -out developer_key.pem 4096
+          openssl pkcs8 -topk8 -inform PEM -outform DER \
+              -in developer_key.pem -out developer_key.der -nocrypt
+          mkdir -p bin
+          monkeyc -f monkey.jungle -o bin/FatigueMeter-test.prg \
+              -y developer_key.der -d edge1050 --unit-test
+      - name: Run tests headlessly (readiness probe + hard timeout)
+        run: bash scripts/run_ciq_tests.sh bin/FatigueMeter-test.prg edge1050
+      - name: Upload sim run log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4.6.2
+        with:
+          name: sim-run-log
+          path: sim-run.log
+
   # --------------------------------------------------------- traceability lint
   traceability:
     name: Constants <-> traceability (advisory)
