@@ -24,6 +24,7 @@ class AntHrm extends Ant.GenericChannel {
     hidden const RF_FREQ     = 57;     // 2457 MHz (ANT+)
 
     hidden var opened;
+    hidden var closing;         // true while deliberately releasing -> suppress auto-reopen (#47)
     hidden var rr;              // buffered RR intervals (ms) since last drain
     hidden var havePrev;
     hidden var prevTime;        // last heart-beat event time (1/1024 s)
@@ -39,6 +40,7 @@ class AntHrm extends Ant.GenericChannel {
         prevCount = 0;
         lastHr = 0;
         opened = false;
+        closing = false;
 
         var cfg = new Ant.DeviceConfig({
             :deviceNumber => 0,                 // wildcard: pair with any HRM
@@ -54,11 +56,15 @@ class AntHrm extends Ant.GenericChannel {
 
     //! Open the channel. Returns true on success. Never throws to the caller.
     function start() {
+        closing = false;                 // a fresh open cancels any prior teardown intent
         try { opened = GenericChannel.open(); } catch (e) { opened = false; }
         return opened;
     }
 
+    //! Release the channel at ride end (#47). GenericChannel.release() is an
+    //! Ant-namespace API and IS legal in a Data Field (unlike the Sensor API).
     function stop() {
+        closing = true;                  // set BEFORE release so its close event is ignored
         try { GenericChannel.release(); } catch (e) { }
         opened = false;
     }
@@ -74,6 +80,21 @@ class AntHrm extends Ant.GenericChannel {
         return out;
     }
 
+    //! Should a channel-response event trigger the self-heal re-open? True only
+    //! for a CHANNEL_CLOSED response received while we are NOT deliberately
+    //! releasing (release() raises its own CHANNEL_CLOSED that must be ignored,
+    //! #47). Extracted as a PURE static predicate so this decision is (:test)-
+    //! drivable without the Ant runtime -- AntHrm itself extends
+    //! Ant.GenericChannel and can't be constructed in the pure test harness, the
+    //! same reason KalmanMath exposes a (:test) injection seam. Takes raw msgId /
+    //! payload / closing so a test can feed synthetic values.
+    static function shouldReopen(msgId, payload, closing) {
+        if (closing) { return false; }
+        if (msgId != Ant.MSG_ID_CHANNEL_RESPONSE_EVENT) { return false; }
+        return payload != null && payload.size() >= 2
+            && payload[1] == Ant.MSG_CODE_EVENT_CHANNEL_CLOSED;
+    }
+
     //! ANT message callback. Broadcast data pages carry the beat time/count we
     //! reconstruct RR from; channel events (close/search-timeout) trigger a
     //! re-open so a brief dropout self-heals. Guarded so a bad packet is inert.
@@ -82,11 +103,10 @@ class AntHrm extends Ant.GenericChannel {
             var id = msg.messageId;
             if (id == Ant.MSG_ID_BROADCAST_DATA) {
                 decode(msg.getPayload());
-            } else if (id == Ant.MSG_ID_CHANNEL_RESPONSE_EVENT) {
-                var p = msg.getPayload();
-                if (p != null && p.size() >= 2 && p[1] == Ant.MSG_CODE_EVENT_CHANNEL_CLOSED) {
-                    try { GenericChannel.open(); } catch (e) { }
-                }
+            } else if (shouldReopen(id, msg.getPayload(), closing)) {
+                // Self-heal a dropout by re-opening. shouldReopen() already
+                // excludes a deliberate release()'s own close event (#47).
+                try { GenericChannel.open(); } catch (e) { }
             }
         } catch (e) { }
     }

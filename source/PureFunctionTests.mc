@@ -1,6 +1,7 @@
 using Toybox.Lang;
 using Toybox.Test;
 using Toybox.Math;
+using Toybox.Ant;
 
 //! Off-device unit tests for the pure formula functions (generation prompt
 //! deliverable §3). Run with the Connect IQ test runner:
@@ -633,5 +634,28 @@ module PureFunctionTests {
             && s[:priorDominated] == true
             && s[:powerAvail] == false
             && s[:stationary] == false;
+    }
+
+    (:test)
+    function testAntShouldReopenPredicate(logger) {
+        // #47: the self-heal reopen DECISION extracted from AntHrm.onAntMessage as
+        // a pure static predicate (AntHrm extends Ant.GenericChannel, so it can't
+        // be constructed here -- same reason KalmanMath exposes a (:test) seam).
+        // Cover every branch with synthetic ANT payloads.
+        var closedEvt = [0, Ant.MSG_CODE_EVENT_CHANNEL_CLOSED];
+        var otherEvt  = [0, 0xFF];   // some non-close response code
+        var resp = Ant.MSG_ID_CHANNEL_RESPONSE_EVENT;
+        return
+            // the one reopen case: a genuine close event while NOT releasing
+            AntHrm.shouldReopen(resp, closedEvt, false) == true
+            // a deliberate release() raises the same close event -> suppressed
+            && AntHrm.shouldReopen(resp, closedEvt, true) == false
+            // a non-close response event never reopens
+            && AntHrm.shouldReopen(resp, otherEvt, false) == false
+            // a broadcast (data) message never reopens
+            && AntHrm.shouldReopen(Ant.MSG_ID_BROADCAST_DATA, closedEvt, false) == false
+            // malformed payloads are inert (null / too short)
+            && AntHrm.shouldReopen(resp, null, false) == false
+            && AntHrm.shouldReopen(resp, [0], false) == false;
     }
 }

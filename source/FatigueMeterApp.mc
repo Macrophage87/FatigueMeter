@@ -17,15 +17,19 @@ class FatigueMeterApp extends Application.AppBase {
     function onStart(state) {
     }
 
-    //! Ride ended / app removed: finalize the ledger + Session Result once.
-    //! Guarded so nothing here can crash on shutdown. NOTE: a Data Field may NOT
-    //! call Sensor.(un)registerSensorDataListener -- it throws "Permission
-    //! Required" at runtime (surfaced once the tests actually ran, see #42). This
-    //! app never registers a Sensor listener (RR comes from a raw ANT+ channel),
-    //! so there is nothing to unregister here.
+    //! Ride ended / app removed: finalize the ledger + Session Result, then
+    //! release the raw ANT+ HRM channel (#47). Both guarded (separate blocks so a
+    //! finalize throw can't skip the release, and vice versa). NOTE: a Data Field
+    //! may NOT call Sensor.(un)registerSensorDataListener -- it throws "Permission
+    //! Required" at runtime (see #42); RR comes from a raw ANT+ channel, released
+    //! here via ant.stop() -> GenericChannel.release(), which IS Ant-namespace and
+    //! Data-Field-legal.
     function onStop(state) {
         try {
             if (view != null) { view.finalizeSession(); }
+        } catch (e) { }
+        try {
+            if (view != null) { view.releaseAnt(); }
         } catch (e) { }
     }
 
