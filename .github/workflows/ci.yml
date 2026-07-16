@@ -77,22 +77,32 @@ jobs:
       image: ghcr.io/matco/connectiq-tester@sha256:7a6f586cb0e0393ff288da09cf27b6dad40a0058a346c529b99fd0fc19858f0f   # v2.8.0 = SDK 9.2.0, edge1050
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
-      - name: Lower hardcoded type-check level (untyped codebase; strict -l 3 is incompatible)
+      # DIAGNOSTIC (issue #9): the previous tester.sh invocation crashed monkeyc
+      # with an opaque internal error ("A critical error has occurred… file a
+      # report with the Connect IQ support team"). BUT the repo owner compiles
+      # this app SUCCESSFULLY with SDK 9.2 locally using the BUILD.md command, so
+      # the SDK version itself is fine. To isolate whether the crash comes from
+      # tester.sh (its flags/env/-l level) or from THIS image's SDK install, this
+      # step replicates the owner's EXACT BUILD.md compile — same monkeyc
+      # invocation, no tester.sh, no -l flag (default type-check level, exactly as
+      # the owner builds) — inside the same matco 9.2.0 container.
+      #
+      # COMPILE-ONLY on purpose: the crash occurs at COMPILE, before any test run,
+      # so we isolate the compile first. Running the unit tests via `monkeydo
+      # bin/FatigueMeter-test.prg edge1050 -t` (needs xvfb) is a deliberate
+      # follow-up once a clean compile is confirmed here.
+      - name: Compile via BUILD.md invocation (edge1050, --unit-test; no tester.sh, no -l)
         run: |
           set -eux
-          # The image's ENTRYPOINT tester.sh hardcodes 'monkeyc ... -t -l 3'; this
-          # repo is untyped Monkey C. Rewrite the level to 1 (Gradual), matching
-          # how the project actually builds (BUILD.md uses no -l). The regex is
-          # whitespace-robust in case spacing changes (e.g. '-l3').
-          test -f /connectiq/bin/tester.sh
-          sed -i -E 's/-l[[:space:]]*3/-l 1/g' /connectiq/bin/tester.sh
-          grep -n 'monkeyc' /connectiq/bin/tester.sh || true
-      - name: Run Connect IQ unit tests (edge1050)
-        # tester.sh positional args are ($1=DEVICE_ID, $2=CERTIFICATE_PATH); it
-        # compiles monkey.jungle in the CWD (the checked-out workspace) and
-        # generates a throwaway certificate when none is given. So we pass only
-        # the device and run from the repo root.
-        run: bash /connectiq/bin/tester.sh edge1050
+          # BUILD.md generates a throwaway developer key with these two openssl
+          # commands; monkeyc requires a signing key even for a unit-test build.
+          if ! command -v openssl >/dev/null 2>&1; then apt-get update && apt-get install -y openssl; fi
+          openssl genrsa -out developer_key.pem 4096
+          openssl pkcs8 -topk8 -inform PEM -outform DER -in developer_key.pem \
+              -out developer_key.der -nocrypt
+          mkdir -p bin
+          # EXACT BUILD.md unit-test compile command (see BUILD.md "Unit tests").
+          monkeyc -f monkey.jungle -o bin/FatigueMeter-test.prg -y developer_key.der -d edge1050 --unit-test
 
   # --------------------------------------------------------- traceability lint
   traceability:
