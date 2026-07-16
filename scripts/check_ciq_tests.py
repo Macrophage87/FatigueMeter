@@ -25,17 +25,24 @@ never a false green.
 Note: `ran` counts every (:test) symbol the runner executes across ALL modules,
 so a helper wrongly tagged (:test) (e.g. a method that takes arguments) shows up
 as an extra ERROR and makes ran != expected -- which the gate correctly reddens.
-`expected` counts (:test) in PureFunctionTests.mc only (where the real tests
-live); if a genuine test is ever added to another module, add that module to the
-count here too, or `ran > expected` will (correctly, but confusingly) redden.
+`expected` counts (:test) across EVERY source/*.mc module (tests live in
+PureFunctionTests.mc and CoverageTests.mc), so a test added to any module is
+tallied automatically and `ran == expected` stays honest.
 """
 import pathlib
 import re
 import sys
 
 log = pathlib.Path(sys.argv[1]).read_text(errors="replace")
-src = pathlib.Path("source/PureFunctionTests.mc").read_text()
-expected = len(re.findall(r"^\s*\(:test\)", src, re.M))     # real tests live here
+# Count (:test) across ALL source modules. Tests live in PureFunctionTests.mc and
+# CoverageTests.mc (#14 split the suite so no single module exhausts the Monkey C
+# type-checker heap). The runner executes (:test) from every module, so `expected`
+# must tally every module too. `(:test)` only appears in test files, so globbing
+# all of source/ is safe and self-maintaining for any future test module.
+expected = sum(
+    len(re.findall(r"^\s*\(:test\)", f.read_text(errors="replace"), re.M))
+    for f in sorted(pathlib.Path("source").glob("*.mc"))
+)
 
 RAN_RE = r"\bRan\s+(\d+)\s+tests?\b"
 SUMMARY_RE = (r"\b(PASSED|FAILED)\b\s*\(\s*passed\s*=\s*(\d+)\s*,"
