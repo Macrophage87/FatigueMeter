@@ -91,30 +91,20 @@ jobs:
       # so we isolate the compile first. Running the unit tests via `monkeydo
       # bin/FatigueMeter-test.prg edge1050 -t` (needs xvfb) is a deliberate
       # follow-up once a clean compile is confirmed here.
-      - name: Diagnose monkeyc --unit-test crash (device vs test-file split)
+      - name: Bisect PureFunctionTests.mc for the construct that crashes --unit-test
         run: |
-          # Prior run proved: plain build OK, --unit-test crashes (level-independent),
-          # SDK 9.2.0. Now split the --unit-test crash two ways in one run:
-          #   D  = is it edge1050-specific? (try other devices; tests are pure
-          #        formulas, device-independent, so a clean device IS a fix path)
-          #   E  = is it the TEST FILE, or --unit-test instrumentation of the app?
-          #        (compile --unit-test with PureFunctionTests.mc removed)
+          # Prior runs proved: plain build OK; --unit-test crashes on EVERY device
+          # (edge1050/fr965/fenix7x/edge840); removing PureFunctionTests.mc makes
+          # --unit-test compile clean. So a construct in that file crashes the
+          # 9.2.0 test-instrumentation pass. This step keeps only the first K test
+          # functions (K=1..N), compiles --unit-test each time, and reports where
+          # the crash first appears -- isolating the exact culprit function.
           set +e
           if ! command -v openssl >/dev/null 2>&1; then apt-get update && apt-get install -y openssl; fi
           openssl genrsa -out developer_key.pem 4096 2>/dev/null
           openssl pkcs8 -topk8 -inform PEM -outform DER -in developer_key.pem -out developer_key.der -nocrypt
           mkdir -p bin
-          for dev in edge1050 fr965 fenix7x edge840; do
-            echo "===== PROBE D[$dev]: --unit-test -d $dev (full tree) ====="
-            monkeyc -f monkey.jungle -o "bin/D-$dev.prg" -y developer_key.der -d "$dev" --unit-test 2>&1
-            echo "PROBE_D_${dev}_EXIT=$?"
-          done
-          echo "===== PROBE E: --unit-test -d edge1050 with PureFunctionTests.mc REMOVED ====="
-          mv source/PureFunctionTests.mc /tmp/PureFunctionTests.mc.bak
-          monkeyc -f monkey.jungle -o bin/E.prg -y developer_key.der -d edge1050 --unit-test 2>&1
-          echo "PROBE_E_EXIT=$?"
-          mv /tmp/PureFunctionTests.mc.bak source/PureFunctionTests.mc
-          echo "===== done ====="
+          python3 scripts/bisect_tests.py
           exit 0
 
   # --------------------------------------------------------- traceability lint
