@@ -80,6 +80,21 @@ class AntHrm extends Ant.GenericChannel {
         return out;
     }
 
+    //! Should a channel-response event trigger the self-heal re-open? True only
+    //! for a CHANNEL_CLOSED response received while we are NOT deliberately
+    //! releasing (release() raises its own CHANNEL_CLOSED that must be ignored,
+    //! #47). Extracted as a PURE static predicate so this decision is (:test)-
+    //! drivable without the Ant runtime -- AntHrm itself extends
+    //! Ant.GenericChannel and can't be constructed in the pure test harness, the
+    //! same reason KalmanMath exposes a (:test) injection seam. Takes raw msgId /
+    //! payload / closing so a test can feed synthetic values.
+    static function shouldReopen(msgId, payload, closing) {
+        if (closing) { return false; }
+        if (msgId != Ant.MSG_ID_CHANNEL_RESPONSE_EVENT) { return false; }
+        return payload != null && payload.size() >= 2
+            && payload[1] == Ant.MSG_CODE_EVENT_CHANNEL_CLOSED;
+    }
+
     //! ANT message callback. Broadcast data pages carry the beat time/count we
     //! reconstruct RR from; channel events (close/search-timeout) trigger a
     //! re-open so a brief dropout self-heals. Guarded so a bad packet is inert.
@@ -88,13 +103,10 @@ class AntHrm extends Ant.GenericChannel {
             var id = msg.messageId;
             if (id == Ant.MSG_ID_BROADCAST_DATA) {
                 decode(msg.getPayload());
-            } else if (id == Ant.MSG_ID_CHANNEL_RESPONSE_EVENT) {
-                var p = msg.getPayload();
-                if (p != null && p.size() >= 2 && p[1] == Ant.MSG_CODE_EVENT_CHANNEL_CLOSED) {
-                    // Self-heal a dropout by re-opening -- but NOT during a
-                    // deliberate release() (that also raises this close event). (#47)
-                    if (!closing) { try { GenericChannel.open(); } catch (e) { } }
-                }
+            } else if (shouldReopen(id, msg.getPayload(), closing)) {
+                // Self-heal a dropout by re-opening. shouldReopen() already
+                // excludes a deliberate release()'s own close event (#47).
+                try { GenericChannel.open(); } catch (e) { }
             }
         } catch (e) { }
     }
