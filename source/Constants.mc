@@ -130,6 +130,9 @@ module Constants {
     const ALPHA1_PLAUSIBLE_MIN = 0.2;   // below -> uncorrelated noise / artifact
     const ALPHA1_PLAUSIBLE_MAX = 1.7;   // above -> impossible (correlated ceiling ~1.5 + headroom)
     const RR_STALE_S = 10;         // no fresh RR for this long -> α1 unavailable (§8.4 staleness timer)
+    // ---- HRM staleness (§8.4 staleness timer, mirror of RR_STALE_S) (#11) ----
+    const HR_STALE_S = 5;          // no fresh HR page for this long -> hold value but mark STALE
+    const HR_UNAVAIL_S = 15;       // no fresh HR page for this long -> HR UNAVAILABLE
 
     // ---- Decoupling / steadiness gate (white paper §3.1) ----
     const EF_BASELINE_START_S = 300;   // baseline window minutes 5..15
