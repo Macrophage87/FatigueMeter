@@ -51,8 +51,9 @@ the manual way to exercise the graceful-degradation matrix (white paper §8.4).
 ## Unit tests (off-device, pure functions)
 
 The pure formula functions have Connect IQ unit tests in
-`source/PureFunctionTests.mc` (NP, decoupling, W′bal, TSS, TRIMP, CTL/ATL/TSB,
-DFA-α1, the Kalman predict/update, the α1↔F coupling, and the
+`source/PureFunctionTests.mc` (NP, decoupling, W′bal, TSS, TRIMP, the CTL/ATL EWMA
+helper — retained pure math even though the cross-ride ledger was removed in
+Rev 5, DFA-α1, the Kalman predict/update, the α1↔F coupling, and the
 respiration-does-not-manufacture-fatigue check):
 
 ```sh
@@ -86,17 +87,20 @@ running a pre-built Docker image as the job container (see `test` below).
   runs the pre-built `ghcr.io/matco/connectiq-tester` Docker image **as the job
   `container`** (digest-pinned; `v2.8.0` = SDK `9.2.0`), which ships the Connect
   IQ SDK and the "Run No Evil" `(:test)` framework — **no SDK download, no
-  self-hosted runner**. The image's `tester.sh` hardcodes `-l 3` (type-check level
-  = **Strict**), incompatible with this **intentionally untyped** codebase (Strict
-  emits hundreds of "… is untyped" errors and aborts), so a build step `sed`s the
-  level to `-l 1` (**Gradual**, matching the project's own build, which passes no
-  `-l`) before compiling. A `--unit-test` compile failure on any device blocks
-  merges.
+  self-hosted runner**. The job invokes `monkeyc` **directly** (the exact
+  `--unit-test` command from "Unit tests" above, plus `-w`) with **no `-l`
+  flag** — it deliberately bypasses the image's `tester.sh` wrapper, which
+  hardcodes `-l 3` (type-check level = **Strict**) and aborts with hundreds of
+  "… is untyped" errors on this **intentionally untyped** codebase; passing no
+  `-l` matches the project's own build. A `--unit-test` compile failure on any
+  device blocks merges.
 - **`simulate`** (**required**, #42) — the **run gate**. It compiles `edge1050`
   `--unit-test` (the `(:test)` suite is pure / device-independent; `test` already
-  covers the 8-device compile) and **actually runs the tests headlessly** (`xvfb`
-  + `monkeydo -t`), asserting `ran == passed == expected`, `failed == 0`,
-  `errors == 0`. A failing or non-running test blocks merges.
+  covers the 8-device compile) and **actually runs the tests headlessly** via
+  `scripts/run_ciq_tests.sh` (`xvfb` + `monkeydo -t` with a readiness probe and a
+  hard timeout — deliberately not the image's `tester.sh`, which hangs on
+  failure), asserting `ran == passed == expected`, `failed == 0`, `errors == 0`.
+  A failing or non-running test blocks merges.
 - **`traceability`** (advisory, `continue-on-error`) —
   `scripts/check_traceability.py` enforces "no physiological constant in
   `source/Constants.mc` without a `docs/traceability.md` row." It is advisory
@@ -129,15 +133,16 @@ the only obvious alternative; the pre-built image sidesteps both — the SDK
 baked in, so the gates run on stock `ubuntu-latest` with no SDK download and no
 self-hosted runner.
 
-We run the image directly rather than via the `matco/action-connectiq-tester`
-wrapper because the action and the image's `tester.sh` entrypoint hardcode
+Each job invokes `monkeyc` / `monkeydo` **directly** and uses the image only for
+the SDK it bundles — it does **not** use the `matco/action-connectiq-tester`
+wrapper or the image's `tester.sh` entrypoint. Both of those hardcode
 `monkeyc … -l 3` (type-check level = **Strict**), which is not exposed as an
-input/env. This repo is **untyped** Monkey C, so Strict aborts with hundreds of
-"… is untyped" errors. Each job `sed`s the level down to `-l 1` (**Gradual**, the
-level suited to an untyped codebase — matching the project's own build, which
-passes no `-l`) inside the container before compiling. The image is **pinned by
-digest** for supply-chain safety; the digest currently corresponds to `v2.8.0`
-(SDK 9.2.0).
+input/env and aborts on this **untyped** Monkey C codebase with hundreds of
+"… is untyped" errors; the jobs instead compile with **no `-l` flag** (matching
+the project's own build) and run the tests via `scripts/run_ciq_tests.sh` (which
+fails fast on a hard timeout rather than hanging the way `tester.sh` does). The
+image is **pinned by digest** for supply-chain safety; the digest currently
+corresponds to `v2.8.0` (SDK 9.2.0).
 
 Both jobs are **required** — in `ci-required`'s `needs`, no `continue-on-error`
 (#42): a `--unit-test` compile failure on any device, or a failing / non-running
