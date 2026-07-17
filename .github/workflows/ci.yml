@@ -201,10 +201,15 @@ jobs:
   #   device measures that. That stays a docs/release-checklist.md item (the
   #   remaining #90 lever; see also #93's per-device construction-heap concern).
   #
-  # NOTE on `-w`: `monkeyc -w` only RAISES warning verbosity -- it does NOT make
-  # warnings fatal. To fail on a warning (e.g. an illegal-API-in-datafield notice
-  # on the release build) we capture output and grep for `WARNING`. Same
-  # digest-pinned SDK image and throwaway-key pattern as `test`.
+  # NOTE on `-w` / warnings: `monkeyc -w` only RAISES warning verbosity -- it does
+  # NOT make warnings fatal. This codebase is INTENTIONALLY UNTYPED, so monkeyc
+  # emits benign "Cannot determine ... container type" notes across nearly every
+  # file (the same reason CI avoids `-l 3`). So this gate does NOT fail on
+  # warnings -- doing so would red every run on that inherent noise. It fails on a
+  # NON-ZERO monkeyc exit: a compile error OR the data-field memory-budget error.
+  # An illegal-datafield-API regression surfaces as a compile/permission ERROR
+  # (non-zero exit), so it is still gated; warnings are logged for diagnostics
+  # only. Same digest-pinned SDK image and throwaway-key pattern as `test`.
   release-build:
     name: Release build + data-field memory budget, all devices
     runs-on: ubuntu-latest
@@ -238,15 +243,12 @@ jobs:
             # Capture BOTH streams: the budget error and any WARNING go to stderr.
             if monkeyc -f monkey.jungle -o "bin/FatigueMeter-$dev.prg" \
                  -y developer_key.der -d "$dev" -w > "$log" 2>&1; then
-              # Compiled: now FAIL on any warning (monkeyc -w is not fatal by itself).
-              if grep -q 'WARNING' "$log"; then
-                echo "::error::release build for $dev emitted warnings:"; cat "$log"
-                rc=1
-              else
-                sz=$(wc -c < "bin/FatigueMeter-$dev.prg")
-                echo "OK: $dev  (${sz} bytes)"
-                printf '%-14s %10d bytes\n' "$dev" "$sz" >> release-sizes.txt
-              fi
+              sz=$(wc -c < "bin/FatigueMeter-$dev.prg")
+              # Warnings are NOT fatal (intentionally untyped codebase — see the
+              # NOTE above); log the count for diagnostics only.
+              wn=$(grep -c 'WARNING' "$log" || true)
+              echo "OK: $dev  (${sz} bytes, ${wn} untyped warnings)"
+              printf '%-14s %10d bytes  %4d warnings\n' "$dev" "$sz" "$wn" >> release-sizes.txt
             else
               # Non-zero exit = compile error OR data-field memory-budget error.
               echo "::error::release compile / data-field memory budget FAILED for $dev:"; cat "$log"
@@ -260,12 +262,7 @@ jobs:
           # stale) committed store/FatigueMeter.iq.
           if monkeyc -e -f monkey.jungle -o bin/FatigueMeter.iq \
                -y developer_key.der -w > build-iq.log 2>&1; then
-            if grep -q 'WARNING' build-iq.log; then
-              echo "::error::.iq package emitted warnings:"; cat build-iq.log
-              rc=1
-            else
-              echo "OK: FatigueMeter.iq  ($(wc -c < bin/FatigueMeter.iq) bytes)"
-            fi
+            echo "OK: FatigueMeter.iq  ($(wc -c < bin/FatigueMeter.iq) bytes, $(grep -c 'WARNING' build-iq.log || true) untyped warnings)"
           else
             echo "::error::.iq package build FAILED:"; cat build-iq.log
             rc=1

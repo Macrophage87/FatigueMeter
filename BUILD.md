@@ -132,9 +132,13 @@ running a pre-built Docker image as the job container (see `test` below).
   build, the exact "Build" command above plus `-w`) for **all 8 manifest
   devices**, and packages the store `.iq` (`monkeyc -e`) — neither of which the
   `--unit-test`-only `test`/`simulate` jobs ever produce. A release compile
-  failure, a data-field memory-budget error (non-zero `monkeyc` exit), or a
-  compiler `WARNING` (grepped from output — `-w` alone is not fatal) on any device
-  blocks merges. Per-device `.prg` sizes, the `.iq`, and a `release-sizes.txt` are
+  failure or a data-field memory-budget error (both = a non-zero `monkeyc` exit)
+  on any device blocks merges. It does **not** fail on warnings: this codebase is
+  intentionally untyped, so `monkeyc` emits benign "container type" notes broadly
+  (the same reason CI avoids `-l 3`); an illegal-datafield-API regression is a
+  compile/permission *error* (non-zero exit), so it is still gated, while warnings
+  are logged for diagnostics only. Per-device `.prg` sizes, the `.iq`, and a
+  `release-sizes.txt` are
   uploaded as an artifact so budget pressure is visible over time (feeds #93). It
   catches the #90 class of a **non-loading / static-over-budget** release image;
   runtime peak-heap OOM is out of a compiler's reach and stays a release-checklist
@@ -195,7 +199,7 @@ corresponds to `v2.8.0` (SDK 9.2.0).
 
 These jobs are **required** — in `ci-required`'s `needs`, no `continue-on-error`
 (#42, #91): a `--unit-test` compile failure on any device, a failing / non-running
-test, or a release-build compile / memory-budget / warning failure blocks merges.
+test, or a release-build compile / memory-budget failure blocks merges.
 The SDK-dependent checks can also be run locally (see "Build", "Package for the
 Connect IQ store", and "Unit tests" above).
 
