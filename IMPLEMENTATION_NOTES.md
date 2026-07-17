@@ -11,9 +11,10 @@ It is a required deliverable of `docs/prompts/connectiq-app-generation-prompt.md
 |---|---|
 | `PrimitivesCalculator.mc` | Layer 1 — NP, EF/decoupling (steadiness-gated), kJ-weighted, DFA-α1 (via `DfaAlpha1`), cadence drift, W′bal |
 | `DfaAlpha1.mc` | DFA-α1 pipeline + artifact % + fB estimate (pure) |
+| `AntHrm.mc` | RR acquisition — raw ANT+ HRM channel → beat-to-beat RR for DFA-α1 (data-field-legal replacement for the Sensor RR listener) |
 | `AcuteFatigueFilter.mc` + `KalmanMath.mc` | Layer 2 — 4-state **linear** Kalman filter with the α1↔F coupling and R_A1 inflation |
 | `EffortCharacterizer.mc` | §8.2 Feat vs Attrition (off the critical path) |
-| `TrainingLoadLedger.mc` | Layer 3 — TSS/TRIMP, CTL/ATL/TSB, ACWR (opt-in), RMSSD baseline, persistent |
+| `TrainingLoadLedger.mc` | Layer 3 — **per-ride load only**: TSS/TRIMP, exported to FIT (Rev 5: cross-ride CTL/ATL/TSB, ACWR, RMSSD baseline & persistence removed — a data field can't keep an honest cross-ride ledger; chronic load lives in the training-load platform) |
 | `FitLogger.mc` | §8.3 FitContributor record + session developer fields |
 | `SessionStore.mc` | §8.3 persistent Session Results + rolling history |
 | `StatusEvaluator.mc` / `DescriptiveStrings.mc` | §4.5/§6/§8.1 descriptive band logic + allowed-copy list |
@@ -70,17 +71,20 @@ It is a required deliverable of `docs/prompts/connectiq-app-generation-prompt.md
    the Session Result fold + FitContributor session fields are written from
    `App.onStop()` (the reliable app-teardown hook), guarded to run **once**.
 
-9. **RR acquisition.** Beat-to-beat RR is read via
-   `Sensor.registerSensorDataListener({:heartBeatIntervals=>{:enabled=>true}})`
-   and buffered for the next `compute()`. The SensorData member name is accessed
-   defensively (`heartBeatIntervals` or `heartBeatIntervalData`) across SDK
-   revisions. If the listener is unavailable the app runs decoupling-only.
+9. **RR acquisition.** A data field may not use `Sensor.registerSensorDataListener`
+   (it throws in the data-field context), so — like the alphaHRV DFA-α1 field —
+   beat-to-beat RR is read from a **raw ANT+ HRM channel** (`AntHrm.mc`), which
+   parses the HRM broadcast's beat-count / event-time pages into RR intervals and
+   buffers them for the next `compute()`. Requires an ANT+ RR-capable strap (Polar
+   H10 class). If the channel is unavailable the app runs decoupling-only.
 
 10. **Cross-ride comparison** data (§8.3) is persisted in `SessionStore` (last 20
-    Session Results) and the footer/strip surface start-fatigue + TSB context;
-    a dedicated multi-ride comparison **screen** is left to a companion widget /
-    Garmin Connect (a data field cannot host a separate browsing screen). The
-    stored records carry every field §8.3 lists.
+    Session Results); a dedicated multi-ride comparison **screen** is left to a
+    companion widget / Garmin Connect (a data field cannot host a separate
+    browsing screen). The stored records carry every field §8.3 lists. (Rev 5: the
+    in-ride start-fatigue / TSB readout was dropped — a data field sees only the
+    rides it runs, so a cross-ride TSB can't be kept honest on-device; that context
+    lives in the training-load platform.)
 
 11. **DFA artifact detector.** A local-median deviation detector (simplified
     Lipponen–Tarvainen; ±3-beat window, 25% tolerance) produces the artifact %
@@ -158,7 +162,6 @@ is hard-coded as if validated).
 | `afiFresh / afiBuilding` | 30 / 60 | convention, F_ref-dependent (§4.5) — now gate the band via `cfg`, not hard-coded |
 | `afiDriftMargin` | 15 | per-athlete AFI drift trigger margin (§4.5) |
 | `decoupRef` | 8 % | synthesis — AFI-decoupling common-scale ref (§4.5) |
-| `seedA / seedB / seedTsbScale` | 0.6 / 0.4 / 30 | synthesis — start-of-ride seeding map (§7) |
 | `featWSev / featMatchW / featBestW / attrDriftW` | 0.02 / 40 / 30 / 100 | synthesis — Feat/Attrition weights (§8.2, off critical path) |
 | `gP / a0 / a1 / sigmoidS` | 0.45 / 1.0 / 0.5 / 0.02 | synthesis — now in the settings UI (gP/sigmoid harness-corrected, see §16–17) |
 | `qHr / qHrLat / qA1 / qF / rHr / rA1` | see file | hand-set Q/R — now in the settings UI |
@@ -167,9 +170,7 @@ is hard-coded as if validated).
 | `artifactGate` | 5 % | pipeline convention |
 | `powerCvGate / coastFracGate` | 0.10 / 0.10 | steadiness/stationarity gate (engineering) |
 | `kjAnchor` | 2000 kJ | population-level, person-specific in practice |
-| `tsbFresh / tsbOverreach` | +10 / −30 | Friel bands, not peer-reviewed |
 | `trimpFemaleCoeff` | **0.86** | **UNRESOLVED** 0.86 vs 0.64 — see §D |
-| `acwrEnabled` | **false** | contested (Lolli/Impellizzeri) — opt-in only |
 | `tauHr / tauA / tauRec` | 30 / 90 / 900 s | synthesis; τ_rec unsourced |
 | `kappaI / kappaD` | 1.45e-4 / 2.8e-3 | synthesis; hand-set |
 | `cF` | 0.0167 | synthesis; unvalidatable cross-signal gain |

@@ -6,8 +6,13 @@ Forerunner devices (see `manifest.xml`).
 
 ## Prerequisites
 
-- **Connect IQ SDK 4.1.0 or newer** (`minSdkVersion` in `manifest.xml`).
-  Install via the [Connect IQ SDK Manager](https://developer.garmin.com/connect-iq/sdk/).
+- **Connect IQ SDK 9.2.0** — the toolchain the required CI gate builds and tests
+  with (`ghcr.io/matco/connectiq-tester` `v2.8.0`, digest-pinned in
+  `.github/workflows/ci.yml`); use it for reproducible builds. Separately,
+  `manifest.xml` sets `minSdkVersion=4.1.0` — the runtime-compatibility floor for
+  target devices, which is distinct from the build SDK and does not change.
+  Install via the [Connect IQ SDK Manager](https://developer.garmin.com/connect-iq/sdk/);
+  confirm your local SDK with `monkeyc --version`.
 - A **developer key**. Generate one once:
   ```sh
   openssl genrsa -out developer_key.pem 4096
@@ -46,8 +51,9 @@ the manual way to exercise the graceful-degradation matrix (white paper §8.4).
 ## Unit tests (off-device, pure functions)
 
 The pure formula functions have Connect IQ unit tests in
-`source/PureFunctionTests.mc` (NP, decoupling, W′bal, TSS, TRIMP, CTL/ATL/TSB,
-DFA-α1, the Kalman predict/update, the α1↔F coupling, and the
+`source/PureFunctionTests.mc` (NP, decoupling, W′bal, TSS, TRIMP, the CTL/ATL EWMA
+helper — retained pure math even though the cross-ride ledger was removed in
+Rev 5, DFA-α1, the Kalman predict/update, the α1↔F coupling, and the
 respiration-does-not-manufacture-fatigue check):
 
 ```sh
@@ -74,68 +80,73 @@ running a pre-built Docker image as the job container (see `test` below).
   32-hex id, an all-zero or all-same-character id). A compile+test path cannot
   see this — a bad id still compiles and still passes tests — which is exactly
   why this cheap runner-free check exists.
-- **`test`** (advisory, `continue-on-error`) — the **compile + unit-test gate**.
-  It runs the pre-built `ghcr.io/matco/connectiq-tester` Docker image **as the
-  job `container`** (digest-pinned; `v2.8.0` = SDK `9.2.0`, incl. `edge1050`),
-  which ships the Connect IQ SDK and the "Run No Evil" `(:test)` framework, so it
-  runs the compile + off-device unit tests on a stock GitHub-hosted runner with
-  **no SDK download and no self-hosted runner**. It targets `edge1050`. The image
-  is run directly (not via the `matco/action-connectiq-tester` wrapper action)
-  because the action — and the image's own `tester.sh` entrypoint — hardcode
-  `monkeyc … -t -l 3` (type-check level 3 = **Strict**), which is incompatible
-  with this **intentionally untyped** Monkey C codebase (Strict emits hundreds of
-  "… is untyped" errors and aborts). A build step `sed`s that level down to `-l 1`
-  (**Gradual**) in-container before invoking the image's own `tester.sh` harness —
-  matching how the project actually builds (the "Build" section above uses no
-  `-l`). It is **advisory** for now so a broken/mismatched image cannot block
-  merges; once a real GitHub run confirms the image builds `edge1050` at `-l 1`
-  and the tests pass, promote it to required by adding `test` to `ci-required`'s
-  `needs`.
+- **`test`** (**required**, #42) — the **compile gate**. It compiles the
+  `--unit-test` build for **every device in `manifest.xml`** (all 8: `edge1050`,
+  `edge1040`, `edge840`, `edge540`, `edgeexplore2`, `fr965`, `fr955`, `fenix7x`)
+  in one shell loop, so the SDK image is pulled once rather than per device. It
+  runs the pre-built `ghcr.io/matco/connectiq-tester` Docker image **as the job
+  `container`** (digest-pinned; `v2.8.0` = SDK `9.2.0`), which ships the Connect
+  IQ SDK and the "Run No Evil" `(:test)` framework — **no SDK download, no
+  self-hosted runner**. The job invokes `monkeyc` **directly** (the exact
+  `--unit-test` command from "Unit tests" above, plus `-w`) with **no `-l`
+  flag** — it deliberately bypasses the image's `tester.sh` wrapper, which
+  hardcodes `-l 3` (type-check level = **Strict**) and aborts with hundreds of
+  "… is untyped" errors on this **intentionally untyped** codebase; passing no
+  `-l` matches the project's own build. A `--unit-test` compile failure on any
+  device blocks merges.
+- **`simulate`** (**required**, #42) — the **run gate**. It compiles `edge1050`
+  `--unit-test` (the `(:test)` suite is pure / device-independent; `test` already
+  covers the 8-device compile) and **actually runs the tests headlessly** via
+  `scripts/run_ciq_tests.sh` (`xvfb` + `monkeydo -t` with a readiness probe and a
+  hard timeout — deliberately not the image's `tester.sh`, which hangs on
+  failure), asserting `ran == passed == expected`, `failed == 0`, `errors == 0`.
+  A failing or non-running test blocks merges.
 - **`traceability`** (advisory, `continue-on-error`) —
   `scripts/check_traceability.py` enforces "no physiological constant in
   `source/Constants.mc` without a `docs/traceability.md` row." It is advisory
   until the matcher is hardened; it can be promoted into the required set later
   (add it to `ci-required`'s `needs`) once it no longer produces false
   positives.
-- **`ci-required`** — the aggregator job that `needs: [manifest-lint]`. **This
-  is the single stable required status check** to require in branch protection
-  (with "require branches to be up to date before merging"). `traceability` is
-  advisory and stays out of the required set. Enabling the branch-protection
-  rule is a manual repo-admin step.
+- **`ci-required`** — the aggregator job that `needs: [manifest-lint, test,
+  simulate]`. **This is the single stable required status check** to require in
+  branch protection (with "require branches to be up to date before merging"), so
+  a failure in any of the three fails it. Only `traceability` stays advisory,
+  out of the required set. Enabling the branch-protection rule is a manual
+  repo-admin step.
 
 The workflow uses no secrets and every `uses:` action is SHA-pinned, so fork-PR
 runs are safe. The PR trigger has **no `paths-ignore`** (the workflow always
 runs on PRs) so a `store/**`- or `LICENSE`-only PR still posts a `ci-required`
 status instead of sitting pending forever under "require branches up to date".
 
-### Compile/unit-test gate
+### Compile + run gates
 
-The compile + unit-test gate is provided by the **`test`** job above, which runs
-the `ghcr.io/matco/connectiq-tester` Docker image **as the job container**.
-Previously this gate was deferred because unattended Garmin SDK download on a
-GitHub-hosted runner is infeasible (EULA + manifest-gated, unpredictable zip
-URLs) and a self-hosted `connectiq` runner was the only obvious option. The
-pre-built image sidesteps that: the SDK (`9.2.0`, incl. `edge1050`) and the "Run
-No Evil" `(:test)` framework are baked in, so the gate runs on stock
-`ubuntu-latest` with no SDK download and no self-hosted runner.
+Two **required** SDK-backed jobs cover the Monkey C surface: **`test`** compiles
+the `--unit-test` build for all 8 manifest devices, and **`simulate`** runs the
+`(:test)` suite headlessly on `edge1050`. Both run the
+`ghcr.io/matco/connectiq-tester` Docker image **as the job container**.
 
-We run the image directly rather than via the `matco/action-connectiq-tester`
-wrapper action because the action and the image's `tester.sh` entrypoint hardcode
-`monkeyc … -t -l 3` (type-check level 3 = **Strict**), which is not exposed as an
-input/env. This repo is **untyped** Monkey C, so Strict aborts with hundreds of
-"… is untyped" errors. The `test` job therefore `sed`s the level down to `-l 1`
-(**Gradual**, the type-check level suited to an untyped codebase — matching the
-project's own build, which passes no `-l`) inside the container, then invokes the
-image's own `tester.sh` (compile + `xvfb` + `monkeydo` + PASSED/FAILED parsing).
-The image is **pinned by digest** for supply-chain safety; the digest currently
+Unattended Garmin SDK download on a GitHub-hosted runner is infeasible (EULA +
+manifest-gated, unpredictable zip URLs), and a self-hosted `connectiq` runner was
+the only obvious alternative; the pre-built image sidesteps both — the SDK
+(`9.2.0`, incl. all 8 device defs) and the "Run No Evil" `(:test)` framework are
+baked in, so the gates run on stock `ubuntu-latest` with no SDK download and no
+self-hosted runner.
+
+Each job invokes `monkeyc` / `monkeydo` **directly** and uses the image only for
+the SDK it bundles — it does **not** use the `matco/action-connectiq-tester`
+wrapper or the image's `tester.sh` entrypoint. Both of those hardcode
+`monkeyc … -l 3` (type-check level = **Strict**), which is not exposed as an
+input/env and aborts on this **untyped** Monkey C codebase with hundreds of
+"… is untyped" errors; the jobs instead compile with **no `-l` flag** (matching
+the project's own build) and run the tests via `scripts/run_ciq_tests.sh` (which
+fails fast on a hard timeout rather than hanging the way `tester.sh` does). The
+image is **pinned by digest** for supply-chain safety; the digest currently
 corresponds to `v2.8.0` (SDK 9.2.0).
 
-The job is **advisory** (`continue-on-error: true`, and not in `ci-required`'s
-`needs`) until a real GitHub run confirms the image builds `edge1050` at `-l 1`
-and the tests pass — so a broken or mismatched image cannot block merges. Once a
-green run is observed, **promote it to required** by adding `test` to
-`ci-required`'s `needs`. (If `-l 1` still trips on untyped code, the next step
-down is `-l 0` = Silent.) The SDK-dependent checks can still be run locally (see
+Both jobs are **required** — in `ci-required`'s `needs`, no `continue-on-error`
+(#42): a `--unit-test` compile failure on any device, or a failing / non-running
+test, blocks merges. The SDK-dependent checks can also be run locally (see
 "Build" and "Unit tests" above).
 
 ## Sideload to an Edge 1050
@@ -145,7 +156,7 @@ down is `-l 0` = Silent.) The SDK-dependent checks can still be run locally (see
 3. Copy `bin/FatigueMeter.prg` into `GARMIN/Apps/` on the device.
 4. Eject, then add **FatigueMeter** as a data field to a full-screen data page
    (it is designed to occupy the whole screen — white paper §8.1).
-5. Configure settings (FTP/CP/W′, HR max/rest, sex, CTL/ATL seed, band cutoffs,
+5. Configure settings (FTP/CP/W′, HR max/rest, sex, band cutoffs,
    filter τ/κ/gains) in **Garmin Connect Mobile → device → Activities & App
    Management → Data Fields → FatigueMeter → Settings**, or in the simulator via
    **File → Edit Persistent Storage / App Settings**.

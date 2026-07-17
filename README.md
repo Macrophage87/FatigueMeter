@@ -1,6 +1,6 @@
 # FatigueMeter
 
-**A research-grounded model and Garmin Connect IQ concept for measuring cyclist fatigue in real time from power, heart rate, and heart-rate variability — and for tracking residual training-scale fatigue over days to weeks.**
+**A research-grounded model and Garmin Connect IQ data field for measuring cyclist fatigue in real time from power, heart rate, and heart-rate variability — and for tracking residual training-scale fatigue over days to weeks.**
 
 ---
 
@@ -14,7 +14,7 @@ FatigueMeter is an attempt to turn the exercise-physiology literature on the **a
 
 No gas-exchange (VO₂) hardware is assumed on-device. The unifying idea is that the aerobic slow component and cardiovascular/autonomic drift are **latent fatigue states** that we cannot measure directly but can *infer* from the way HR and HRV decouple from power over time.
 
-This repository currently holds the **research and design layer**. It is not yet an app — it is the literature review, the white paper that specifies the model, and the generation/validation prompts needed to build the app responsibly.
+This repository holds both the **research/design layer** (literature review, white paper, generation/validation prompts) **and the resulting Connect IQ data field** — a Monkey C implementation targeting 8 Garmin Edge / Forerunner / fenix products (Edge 1050 lead), in `source/` + `manifest.xml`, with a packaged store build in `store/FatigueMeter.iq`. The docs remain the spec; the code is the app the spec generated.
 
 ## The questions this project tries to answer
 
@@ -49,14 +49,26 @@ and the [literature-review appendix](docs/literature-review.md#appendix--figures
 ```
 FatigueMeter/
 ├── README.md                                   ← you are here
+├── BUILD.md                                    ← build / simulate / sideload
+├── IMPLEMENTATION_NOTES.md                     ← engineering choices & exposed settings
+├── manifest.xml  monkey.jungle                 ← Connect IQ data-field manifest + build config
+├── source/                                     ← Monkey C implementation (19 modules + 2 test)
+├── resources/                                  ← strings, settings UI, property defaults, drawables
+├── scripts/                                    ← CI helpers (traceability + (:test)-count lints)
+├── store/                                      ← packaged FatigueMeter.iq + Garmin store assets
 └── docs/
     ├── literature-review.md                    ← the full, cited literature review
     ├── white-paper.md                          ← the design white paper (model spec, metrics, thresholds)
     ├── references.md                           ← consolidated bibliography with verification status
+    ├── traceability.md                         ← constant→provenance matrix (every Constants.mc symbol)
+    ├── connectiq-ci-setup.md                   ← CI / toolchain setup notes
     ├── figures/                                ← fatigue-variable behavior figures (SVG + PNG) + generator
+    ├── paper/                                  ← typeset paper sources
+    ├── reviews/                                ← design & review notes
     └── prompts/
-        ├── connectiq-app-generation-prompt.md  ← LLM prompt to generate the Connect IQ app
-        └── scientific-validation-prompt.md     ← LLM prompt for a scientific-consistency validation scheme
+        ├── connectiq-app-generation-prompt.md          ← LLM prompt to generate the Connect IQ app
+        ├── connectiq-settings-parameters-prompt.md     ← LLM prompt for the settings / parameters schema
+        └── scientific-validation-prompt.md             ← LLM prompt for a scientific-consistency validation scheme
 ```
 
 ## Reading order
@@ -67,7 +79,7 @@ FatigueMeter/
 
 ## Status & provenance
 
-- **Stage:** research / design. No Monkey C application code exists yet.
+- **Stage:** implemented (pre-pilot). The Connect IQ data field is built (`source/`, 19 modules) and packaged (`store/FatigueMeter.iq`) with Garmin store-submission assets. The precise numeric AFI stays gated off (`positivePilot` / `shipNumberOverride`) until calibrated against labeled rides, so shipped output is the 3-state advisory only (§8.1). See `BUILD.md` to build/sideload and `IMPLEMENTATION_NOTES.md` for engineering choices.
 - **Evidence base:** assembled from ~25 primary and secondary sources via deep full-text reads. Every load-bearing claim in the literature review carries a citation and, where relevant, a **verification flag** (confirmed / partially verified / unverified-paywalled / author's synthesis). Several agreement statistics for DFA-α1 thresholds and a handful of coaching-convention thresholds (e.g. Training Stress Balance bands) are explicitly marked as *not traceable to a peer-reviewed cutoff* — they are configurable defaults, not validated constants.
 - **Honesty note:** the single most important caveat in the whole project is that **no published, validated model estimates the VO₂ slow component (or "damage") directly from power + HR + HRV.** FatigueMeter composes validated *pieces* (DFA-α1 thresholds, aerobic decoupling, DALE-style efficiency-loss kinetics, Banister/CTL-ATL-TSB load accounting) into a *new* estimator. The fused estimator itself must be calibrated against the user's own labeled rides before its fatigue state is trusted.
 
