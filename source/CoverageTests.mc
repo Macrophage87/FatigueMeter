@@ -660,6 +660,68 @@ module CoverageTests {
         return (cleaned.size() == 1) && SessionStore.tokenInHistory(cleaned, 4242);
     }
 
+    //! Test-only fake writer for shedWrite (#65). An INSTANCE method so a test can
+    //! bind it via the proven explicit-receiver form writer.method(:write) -> a
+    //! Lang.Method; the only method() in source/ is AntHrm's instance-context
+    //! method(:onAntMessage), so module-scope method(:sym) has no precedent here.
+    //! `fitsAtOrBelow` lets each test choose the size at which the "write" succeeds.
+    class FakeShedWriter {
+        hidden var fitsAtOrBelow;
+        function initialize(fitsAtOrBelow_) { fitsAtOrBelow = fitsAtOrBelow_; }
+        // 1 = persisted (fits at this size), 0 = too-big (shed oldest & retry)
+        function write(work) { return (work.size() <= fitsAtOrBelow) ? 1 : 0; }
+    }
+
+    (:test)
+    function testShedWriteFitsAfterDropping(logger) {
+        // #65: drives the REAL persist() loop (shedWrite) via a fake writer. Fits
+        // once size <= 2. Seed [1..5], newest last == 5.
+        var work = [] as Lang.Array;
+        for (var i = 1; i <= 5; i++) { work.add(i); }
+        var writer = new FakeShedWriter(2);
+        var res = SessionStore.shedWrite(work, 1, writer.method(:write));   // instance-context .method()
+        var committed = res[0] as Lang.Array;
+        var okStatus  = (res[2] == true);
+        var okDropped = (res[1] == 3);                           // 5 -> 2 sheds 3
+        var okSize    = (committed.size() == 2);
+        // IDENTITY, not just size: a remove-from-BACK mutant keeps size 2 but drops
+        // the newest. Assert the last element is still the newest (5).
+        var okNewest  = (committed[committed.size() - 1] == 5);
+        return okStatus && okDropped && okSize && okNewest;
+    }
+
+    (:test)
+    function testShedWriteFloorAborts(logger) {
+        // #65: never fits (size never <= 0) -> sheds to the floor, never persists.
+        var N = 5;
+        var work = [] as Lang.Array;
+        for (var i = 1; i <= N; i++) { work.add(i); }
+        var writer = new FakeShedWriter(0);
+        var res = SessionStore.shedWrite(work, 1, writer.method(:write));
+        var okStatus  = (res[2] == false);
+        var okDropped = (res[1] == N - 1);   // shed down to floor=1 => N-1 drops
+        var okNull    = (res[0] == null);    // null commit -> persist() keeps full history, shed stays false
+        return okStatus && okDropped && okNull;
+    }
+
+    (:test)
+    function testShedWriteFitsImmediatelyNoDrop(logger) {
+        // #65: the COMMON path -- writer fits at full size, so shedWrite commits
+        // with dropped == 0. Kills a commit-with-0-dropped mutant that persist()'s
+        // `dropped > 0` shrink gate relies on (a >0 that returned 1 at 0 would set
+        // shed spuriously). Seed [1..5]; nothing is shed.
+        var work = [] as Lang.Array;
+        for (var i = 1; i <= 5; i++) { work.add(i); }
+        var writer = new FakeShedWriter(5);   // fits immediately (size 5 <= 5)
+        var res = SessionStore.shedWrite(work, 1, writer.method(:write));
+        var committed = res[0] as Lang.Array;
+        var okStatus  = (res[2] == true);
+        var okDropped = (res[1] == 0);
+        var okSize    = (committed.size() == 5);
+        var okNewest  = (committed[committed.size() - 1] == 5);
+        return okStatus && okDropped && okSize && okNewest;
+    }
+
     // ---- TrainingLoadLedger day-index + real-dt (#22) and ewmaFold guard (#34a) ----
     // NOTE: the caller-side pause->dt=0 decision lives in FatigueMeterView.computeInner
     // (view loop) and is verified by reasoning, not a pure unit test -- it needs an
