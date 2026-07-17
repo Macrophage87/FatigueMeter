@@ -4,6 +4,7 @@ using Toybox.Graphics;
 using Toybox.Activity;
 using Toybox.Sensor;
 using Toybox.System;
+using Toybox.Time;
 
 //! The single glance screen + the 1 Hz compute loop (white paper §8.1).
 //!
@@ -27,6 +28,8 @@ class FatigueMeterView extends WatchUi.DataField {
     hidden var prevTimerMs;    // last activity-timer reading (ms) for real-dt derivation (#22)
     hidden var seeded;
     hidden var finalized;
+    hidden var sessionToken;        // stable per-ride id for reconcile dedup (#17)
+    hidden var lastCheckpointTick;  // tick of the last durable summary checkpoint (#17)
 
     // ride-summary accumulators
     hidden var peakAfi;
@@ -88,6 +91,8 @@ class FatigueMeterView extends WatchUi.DataField {
         prevTimerMs = null;
         seeded = false;
         finalized = false;
+        sessionToken = Time.now().value();   // stable per-ride id (ride-start epoch s) for reconcile dedup (#17)
+        lastCheckpointTick = 0;
         dWriteFailed = false;
         peakAfi = 0.0;
         lastFreshMatchCount = 0;
@@ -316,6 +321,14 @@ class FatigueMeterView extends WatchUi.DataField {
         fit.logRecord(afi, filter.fState(), decoupVal, prims.alpha1Raw(),
                       prims.wBalFraction() * cfg.wPrime, dKjw,
                       effort.feat(dBest5), effort.attrition(a1DriftBelow));
+
+        // ---- durable checkpoint (#17): survive an ungraceful stop ----
+        // computeInner runs inside compute()'s §8.4 try and every Storage call is
+        // itself guarded, so a checkpoint failure can never disturb the loop.
+        if (!finalized && tick - lastCheckpointTick >= Constants.CHECKPOINT_PERIOD_S) {
+            lastCheckpointTick = tick;
+            checkpointSession();
+        }
     }
 
     //! Validate a raw Activity.Info field into a finite number or null. This is
@@ -346,7 +359,32 @@ class FatigueMeterView extends WatchUi.DataField {
         var rideTss = ledger.finalizeRide();
         var driftBucketLbl = AcuteFatigueFilter.fatigueBucket(rideDrift, cfg.fRef);
 
-        var summary = {
+        fit.logSession(buildSummary(rideDrift, rideTss));
+        // append() keeps the record in the in-memory history even if the durable
+        // write fails; capture the outcome so a "not saved" affordance can surface
+        // it (footer rendering coordinated with #28).
+        dWriteFailed = !sessions.append(buildSessionResult(rideDrift, rideTss, driftBucketLbl));
+        sessions.clearActive();   // committed to history — drop the in-progress checkpoint (#17)
+    }
+
+    //! Snapshot the running summary to durable Storage + refresh the FIT session
+    //! fields so an ungraceful stop still leaves a (near-final) summary (#17). All
+    //! reads — finalizeRide()/fState()/effort/prims are non-destructive — so this is
+    //! safe to call every cadence; it shares finalizeSession's builders so the
+    //! checkpoint and the final write can never drift.
+    hidden function checkpointSession() {
+        var rideDrift = filter.fState();
+        var rideTss = ledger.finalizeRide();
+        var driftBucketLbl = AcuteFatigueFilter.fatigueBucket(rideDrift, cfg.fRef);
+        // Re-set the FIT session fields so a crash-recovered .FIT still has a summary
+        // (best-effort: helps only if Garmin's auto-recovery flushes the last setData).
+        fit.logSession(buildSummary(rideDrift, rideTss));
+        // Durable snapshot for reconcile-on-next-start (the load-bearing safety net).
+        sessions.checkpoint(buildSessionResult(rideDrift, rideTss, driftBucketLbl));
+    }
+
+    hidden function buildSummary(rideDrift, rideTss) {
+        return {
             :tss => rideTss,
             :endFatigue => rideDrift,
             :peakAfi => peakAfi,
@@ -354,9 +392,10 @@ class FatigueMeterView extends WatchUi.DataField {
             :redAttrS => effort.redAttritionSeconds(),
             :durabilityKj => prims.kjWeightedValue()
         };
-        fit.logSession(summary);
+    }
 
-        var result = SessionStore.buildResult(
+    hidden function buildSessionResult(rideDrift, rideTss, driftBucketLbl) {
+        var r = SessionStore.buildResult(
             ledger.dayIndexPublic(), tick, rideTss,
             rideDrift, peakAfi,
             effort.redFeatSeconds(), effort.redAttritionSeconds(),
@@ -364,10 +403,8 @@ class FatigueMeterView extends WatchUi.DataField {
             effort.best1(), effort.best5(), effort.best20(),
             effort.matchesBurned(), prims.kjWeightedValue(),
             driftBucketLbl, filter.afiUncertainty());
-        // append() keeps the record in the in-memory history even if the durable
-        // write fails; capture the outcome so a "not saved" affordance can surface
-        // it (footer rendering coordinated with #28).
-        dWriteFailed = !sessions.append(result);
+        r.put("sessionToken", sessionToken);   // stable id -> reconcile dedup (#17)
+        return r;
     }
 
     // =====================================================================

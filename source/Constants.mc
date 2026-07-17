@@ -143,6 +143,11 @@ module Constants {
     const RR_WATCHDOG_MS = 40000;  // no decoded page this long while open -> forced channel restart (> ~30 s search)
     const RR_BUF_MAX = 256;        // cap the buffered RR list if the compute loop stalls (drop oldest)
 
+    // ---- Crash-recovery checkpoint cadence (§8.4; #17) ----
+    const CHECKPOINT_PERIOD_S = 30;  // durable in-progress summary snapshot every 30 s so an ungraceful
+                                     // stop loses at most this window of SUMMARY, not the ride (time-series
+                                     // is unaffected). Engineering cadence; ~600 writes/5 h to one key.
+
     // ---- Decoupling / steadiness gate (white paper §3.1) ----
     const EF_BASELINE_START_S = 300;   // baseline window minutes 5..15
     const EF_BASELINE_END_S = 900;
