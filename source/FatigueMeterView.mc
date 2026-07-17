@@ -55,6 +55,7 @@ class FatigueMeterView extends WatchUi.DataField {
     hidden var dPowerAvail;
     hidden var dStationary;
     hidden var dWriteFailed;   // last session append could not persist (#18); footer surfacing tracked with #28
+    hidden var dStrapHr;       // strap-HR staleness Metric — DISPLAY ONLY (#57); never fed to the filter/math
 
     //! Conservative NODATA defaults written at construction BEFORE the guarded
     //! collaborator build (§8.4, #13): if that build throws, the field is left on
@@ -91,6 +92,19 @@ class FatigueMeterView extends WatchUi.DataField {
         return [x0, wBand];
     }
 
+    //! Diagnostic strap-HR token for the footer (display-only, #57). Pure so the
+    //! availability -> text mapping is (:test)-drivable. OK -> "strap 142";
+    //! STALE -> "strap 140 stale"; UNAVAILABLE / null / no-value -> "strap --"
+    //! (the codebase's "no <sensor>" grey-out convention). Never touches the math.
+    static function strapHrToken(m) {
+        if (m == null || m.availability == Signals.AVAIL_UNAVAILABLE || m.value == null) {
+            return "strap --";
+        }
+        var v = m.value.format("%d");
+        return (m.availability == Signals.AVAIL_STALE) ? ("strap " + v + " stale")
+                                                       : ("strap " + v);
+    }
+
     function initialize() {
         DataField.initialize();
         ready = false;
@@ -116,6 +130,7 @@ class FatigueMeterView extends WatchUi.DataField {
         dAfi = snap[:afi]; dAfiUnc = snap[:afiUnc];
         dDecoup = Signals.Metric.unavailable("--");
         dAlpha1 = Signals.Metric.unavailable("no RR");
+        dStrapHr = Signals.Metric.unavailable("no HR");   // #57 display-only default
         dArtifact = null;
         dKjw = 0.0; dKjTotal = 0.0; dWmatches = 0;
         dBest1 = 0.0; dBest5 = 0.0; dBest20 = 0.0;
@@ -328,6 +343,14 @@ class FatigueMeterView extends WatchUi.DataField {
             lastCheckpointTick = tick;
             checkpointSession();
         }
+
+        // ---- strap-HR diagnostic snapshot (#57): DISPLAY ONLY ----
+        // Written LAST so even an unlikely throw from hrMetric() can only drop this
+        // tick's diagnostic, never skip the fatigue math above. Does NOT feed the
+        // filter -- info.currentHeartRate remains the sole HR input. hrMetric() is a
+        // side-effect-free read on the monotonic System clock.
+        dStrapHr = (ant != null) ? ant.hrMetric(System.getTimer())
+                                 : Signals.Metric.unavailable("no HR");
     }
 
     //! Validate a raw Activity.Info field into a finite number or null. This is
@@ -605,9 +628,15 @@ class FatigueMeterView extends WatchUi.DataField {
         dc.setColor(0x1A1A1A, Graphics.COLOR_TRANSPARENT);
         dc.fillRectangle(0, y, w, rowH);
 
-        // line 1: RR artifact / α1 validity + steadiness indicator
+        // line 1: RR artifact / α1 validity + steadiness indicator, plus the
+        // strap-HR diagnostic (#57) appended ONLY if it still fits — line 1 is
+        // already a centered single-line FONT_XTINY with no wrap, so on a narrow /
+        // round device the strap token gracefully drops rather than clipping.
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w / 2, y + rowH * 0.16, Graphics.FONT_XTINY, footerText(),
+        var line1 = footerText();
+        var line1s = line1 + "  ·  " + strapHrToken(dStrapHr);
+        if (dc.getTextWidthInPixels(line1s, Graphics.FONT_XTINY) <= w) { line1 = line1s; }
+        dc.drawText(w / 2, y + rowH * 0.16, Graphics.FONT_XTINY, line1,
                     Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
 
         // line 2: advisory basis / uncalibrated note
