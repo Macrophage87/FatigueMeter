@@ -92,10 +92,22 @@ back to the matching item here.
        landed; then weigh remediation #4, window resize, only with a fatigue-output
        regression on this fixture — it is model-altering).
 
+    One row **per device** (Step 1 records the cap per device, so don't group them):
+
     | device | cap (KB) | construction | first-compute | fill-phase | steady | headroom |
     |--------|----------|--------------|---------------|------------|--------|----------|
-    | edge1050 |  |  |  |  |  |  |
-    | edge540 / edge840 / edgeexplore2 / fr955 / fenix7x |  |  |  |  |  |  |
+    | edge1050 (primary) |  |  |  |  |  |  |
+    | edge1040 |  |  |  |  |  |  |
+    | edge840 |  |  |  |  |  |  |
+    | edge540 |  |  |  |  |  |  |
+    | edgeexplore2 |  |  |  |  |  |  |
+    | fr965 |  |  |  |  |  |  |
+    | fr955 |  |  |  |  |  |  |
+    | fenix7x |  |  |  |  |  |  |
+
+    (All 8 manifest devices — the tight-budget concern centres on
+    `edge540`/`edge840`/`edgeexplore2`/`fr955`/`fenix7x`, but profile edge1050 and
+    edge1040 too so the primary target's headroom is on record.)
 
 - [ ] **Store package — regenerate + sign `store/FatigueMeter.iq`** (#91)
   - CI's `release-build` builds the `.iq` with a **throwaway** key (packaging
