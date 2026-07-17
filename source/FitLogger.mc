@@ -27,12 +27,19 @@ class FitLogger {
     hidden var rec;        // dictionary id -> field (record)
     hidden var ses;        // dictionary id -> field (session)
     hidden var ok;
+    hidden var nanF;       // NaN gap sentinel for a dropped record field (#20); runtime-built
 
     function initialize(dataField) {
         rec = {};
         ses = {};
         ok = false;
         try {
+            // Runtime-built NaN gap sentinel (#20). NEVER a two-literal constant like
+            // 0.0/0.0 -- that is the SDK 9.2.0 constant-folder crash class (#9); build
+            // it from a runtime +Inf, matching PureFunctionTests.posInf(). Kept INSIDE
+            // this try so any hazard fails closed into the catch below.
+            var b = 9.0e37; var inf = b * b;   // runtime +Inf (a 1.0e30*1.0e30 literal crashes the folder)
+            nanF = inf - inf;                  // runtime NaN
             createRecordFields(dataField);
             createSessionFields(dataField);
         } catch (e) {
@@ -98,10 +105,24 @@ class FitLogger {
         mkSes(df, SFLD_KJW,       "durability_kJ","kJ");
     }
 
+    //! Pure value fork: a finite value passes through; a null/non-finite value maps
+    //! to the gap sentinel. Extracted so the branch is (:test)-drivable without a
+    //! DataField (#20). Untagged (has params) so the runner never treats it as a test.
+    static function pickRecValue(v, nanF) {
+        return (v != null && MathUtil.isFinite(v)) ? v.toFloat() : nanF;
+    }
+
     hidden function setRec(id, v) {
-        if (rec.hasKey(id) && v != null && MathUtil.isFinite(v)) {
-            try { rec[id].setData(v.toFloat()); } catch (e) { }
-        }
+        if (!rec.hasKey(id)) { return; }
+        // Finite -> record it; null/non-finite -> write the NaN gap sentinel so a
+        // sensor dropout records a hole instead of repeating last second (#20).
+        // UNVERIFIED: whether setData(NaN) encodes as the FIT invalid value (a true
+        // gap) vs. being rejected/clamped is a device/simulator fact NOT provable in
+        // CI -- it needs the recorded Connect IQ FIT-export check gating #20's merge.
+        // If NaN is rejected, this setData throws and the catch reverts to today's
+        // flatline (a SILENT no-op that still flatlines -- do not merge until the
+        // check confirms NaN -> gap).
+        try { rec[id].setData(pickRecValue(v, nanF)); } catch (e) { }
     }
     hidden function setSes(id, v) {
         if (ses.hasKey(id) && v != null && MathUtil.isFinite(v)) {
@@ -109,12 +130,11 @@ class FitLogger {
         }
     }
 
-    //! Log one record (called at ~1 Hz from compute()). A null/non-finite input
-    //! leaves that field unset for this record; under the FitContributor
-    //! developer-field encoding an unset field carries its previous value
-    //! forward, so a dropped sensor reads as a held (flat) value rather than a
-    //! true gap (see issue #20). A missing sensor never blocks logging of the
-    //! other fields.
+    //! Log one record (called at ~1 Hz from compute()). A finite value is recorded;
+    //! a null/non-finite input writes a NaN gap sentinel so a dropped sensor records
+    //! a hole rather than repeating the previous second's reading (#20). A missing
+    //! sensor never blocks logging of the other fields. (See setRec: the NaN->gap
+    //! encoding is pending the recorded simulator FIT-export check gating #20.)
     function logRecord(afi, f, decoup, a1, wbal, kjw, feat, attr) {
         if (!ok) { return; }
         setRec(FLD_AFI, afi);

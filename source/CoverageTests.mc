@@ -477,6 +477,22 @@ module CoverageTests {
         return r[:advisoryActive] == false;
     }
 
+    // ---- FitLogger.pickRecValue gap fork (#20 Option A) ----
+    (:test)
+    function testPickRecValueForksOnFinite(logger) {
+        // A finite value passes through; null/non-finite maps to the sentinel arg.
+        // Uses a DISTINGUISHABLE FINITE sentinel so identity is asserted by equality:
+        // a mutant that drops the isFinite check and returns +Inf fails (+Inf != -999),
+        // which a bare !isFinite(infG) guard would have missed. +Inf is runtime-built
+        // (#9-safe), never a literal.
+        var b = 9.0e37; var inf = b * b;                       // runtime +Inf
+        var SENT = -999.0;
+        var real  = FitLogger.pickRecValue(42.0, SENT);        // finite -> real value
+        var nullG = FitLogger.pickRecValue(null, SENT);        // null   -> sentinel
+        var infG  = FitLogger.pickRecValue(inf,  SENT);        // +Inf   -> sentinel
+        return real == 42.0 && nullG == SENT && infG == SENT;
+    }
+
     // ---- FitLogger.deriveOk partial-success rule (#20) ----
     // FitLogger.initialize derives `ok` from how many developer fields actually
     // got created, not from an exception-free run, so a PARTIAL success still logs
