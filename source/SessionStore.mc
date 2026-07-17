@@ -70,49 +70,71 @@ class SessionStore {
         return !writeFailed;
     }
 
-    //! Atomic write with shed-until-fits on a storage-full failure (#62). Sheds the
-    //! OLDEST record from a WORKING COPY and retries down to MIN_HISTORY, committing
-    //! the (possibly shrunk) list to `history` ONLY on a successful write — so any
-    //! non-persisting failure leaves the full in-memory history intact, honoring the
-    //! invariant append() documents above. Never throws. `shed` is set true only
-    //! when a durable write actually dropped records.
-    //!
-    //! The catch is deliberately catch-ALL. History integrity does NOT depend on the
-    //! exception type (the working-copy design makes any non-persisting path a no-op
-    //! on `history`), so no typed discriminator is landed here. A typed
-    //! `catch (e instanceof ...)` to skip shedding on a non-storable (serialization)
-    //! value is DEFERRED to the simulator step (#62): it must not be added until the
-    //! simulator confirms (a) which exception a non-storable value raises —
-    //! Lang.InvalidValueException and Lang.UnexpectedTypeException are both plausible
-    //! (the latter is this codebase's type-error exception) — and (b) that the
-    //! quota/full-store path does NOT raise that same type, else the guard would
-    //! swallow the quota case and defeat shedding entirely.
+    //! Atomic write with shed-until-fits on a storage-full failure (#62). persist()
+    //! is a THIN I/O wrapper (#65): it copies `history`, drives the pure shedWrite()
+    //! loop with the real tryWrite() writer, and commits the (possibly shrunk) list
+    //! to `history` ONLY on a successful write — so any non-persisting failure leaves
+    //! the full in-memory history intact, honoring the invariant append() documents
+    //! above. Never throws. `shed` is set true only when a durable write dropped
+    //! records. The loop itself now lives in shedWrite() so its commit-on-success /
+    //! keep-full-history-on-floor invariants are unit-testable with a fake writer.
     hidden function persist() {
-        shed = false;
+        shed = false;   // reset: a later NON-shedding success must not leak a stale shed==true
         // `as Lang.Array` so the copy is a general Array, not the zero-length
         // `Array[]` the type-checker infers for a bare `[]` literal (which rejects
         // index reads like working[0]).
         var working = [] as Lang.Array;                      // shallow copy of history
         for (var i = 0; i < history.size(); i++) { working.add(history[i]); }
-        var dropped = 0;
-        // Bounded: each failed attempt sheds one record; the shouldShed() floor
-        // guard breaks at MIN_HISTORY. The condition is always true in practice
-        // (working starts non-empty) but is written falsifiable so the trailing
-        // return is reachable -- a bare while(true) trips "not all code paths return".
-        while (working.size() > 0) {
-            try {
-                Storage.setValue(KEY, working);
-                if (dropped > 0) { history = working; shed = true; }   // commit the shrink on success only
-                return true;
-            } catch (e) {
-                if (!shouldShed(working.size(), MIN_HISTORY)) { break; }
-                working.remove(working[0]);   // drop oldest from the COPY, retry smaller
-                dropped++;
-                System.println("SessionStore: store full — shed oldest, retry (n=" + working.size() + ")");
+
+        var res = shedWrite(working, MIN_HISTORY, method(:tryWrite));
+        if (res[2] == true) {                                // Boolean status -> plain ==, no Object? method call
+            if ((res[1] as Lang.Number) > 0) {               // dropped > 0: commit the shrink on success only
+                history = res[0] as Lang.Array;
+                shed = true;
             }
+            return true;
         }
         System.println("SessionStore: persist failed at floor; kept full history in RAM");
-        return false;
+        return false;                                        // floor path: history untouched, shed stays false
+    }
+
+    //! Pure shed-until-fits driver (#62/#65). Calls `writer.invoke(work)`; on a
+    //! too-big signal (0) sheds the OLDEST element from `work` and retries down to
+    //! `floor`. Returns [committedArrayOrNull, dropped, ok(Boolean)]:
+    //!   ok==true  -> committed is the (possibly shrunk) array that persisted;
+    //!   ok==false -> floor reached without a durable write; committed is null and
+    //!                the caller must keep its full in-memory history.
+    //! `writer` returns 1 = persisted, 0 = too-big (shed & retry). No I/O, no Storage
+    //! — so the commit-on-success / stop-at-floor invariants are (:test)-drivable
+    //! with a fake writer (CoverageTests FakeShedWriter), independent of whether the
+    //! simulator enforces a storage quota.
+    static function shedWrite(work, floor, writer) {
+        var dropped = 0;
+        // Falsifiable condition + trailing return: a bare while(true) trips
+        // "not all code paths return a value".
+        while (work.size() > 0) {
+            if (writer.invoke(work) == 1) { return [work, dropped, true]; }   // committed (maybe shrunk)
+            if (!shouldShed(work.size(), floor)) { break; }  // at floor: stop, don't shed below
+            work.remove(work[0]);                            // drop OLDEST, retry smaller
+            dropped++;
+        }
+        return [null, dropped, false];                       // floor hit, nothing persisted
+    }
+
+    //! Real-I/O writer injected into shedWrite: one Storage.setValue, reporting
+    //! 1 = persisted / 0 = too-big. The catch is deliberately catch-ALL — history
+    //! integrity does NOT depend on the exception type (persist()'s working-copy
+    //! design makes any non-persisting path a no-op on `history`), so no typed
+    //! discriminator is landed. Skipping the shed on a non-storable (serialization)
+    //! value is intentionally NOT separable on the simulator (#65): the storage-fill
+    //! probe only ever provokes the QUOTA exception, never a serialization one, so
+    //! "shed on quota, abort on non-storable" cannot be distinguished there.
+    //! Lang.InvalidValueException and Lang.UnexpectedTypeException are both plausible
+    //! for the full-store path; confirming the exact class is a one-time MANUAL sim
+    //! run on the digest-pinned SDK image (release-checklist item), never a CI gate.
+    hidden function tryWrite(work) {
+        try { Storage.setValue(KEY, work); return 1; }
+        catch (e) { return 0; }
     }
 
     //! Shed another record only while above the floor. Pure so the floor guard is
