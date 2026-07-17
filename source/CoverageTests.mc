@@ -286,6 +286,36 @@ module CoverageTests {
     }
 
     (:test)
+    function testRingBufferClearThenRegrowsPastOldSize(logger) {
+        // The one branch lazy-grow adds that the other tests don't pin: partial
+        // grow -> clear() (backbone retained at 2) -> refill PAST the old size, so
+        // pushes cross from the reuse branch (head < buf.size()) BACK into the
+        // growth `add` branch. Reachable via an early-ride pause/reset before the
+        // window fills. Must keep toArray() order exact across that crossover.
+        var rb = new RingBuffer(5);
+        rb.push(1); rb.push(2);               // partial: backbone grew to size 2
+        rb.clear();                            // count=0, buf retained at size 2
+        rb.push(10); rb.push(20);             // reuse branch (head < buf.size 2)
+        rb.push(30); rb.push(40);             // growth branch again (past old size 2)
+        var arr = rb.toArray();               // [10,20,30,40] oldest->newest
+        return (rb.size() == 4) && (arr.size() == 4) && (arr[0] == 10)
+               && (arr[1] == 20) && (arr[2] == 30) && (arr[3] == 40)
+               && (rb.latest() == 40) && (rb.isFull() == false);
+    }
+
+    (:test)
+    function testRingBufferCapOneGrowsThenOverwrites(logger) {
+        // cap==1: first push grows (add), second push overwrites at modulo-1 and
+        // evicts the prior value -- the tightest wrap boundary.
+        var rb = new RingBuffer(1);
+        var e1 = rb.push(5);                  // growth: add -> [5], full
+        var e2 = rb.push(6);                  // overwrite buf[0], evict 5
+        var arr = rb.toArray();               // [6]
+        return (e1 == null) && (e2 == 5) && (rb.size() == 1) && rb.isFull()
+               && (arr.size() == 1) && (arr[0] == 6) && (rb.latest() == 6);
+    }
+
+    (:test)
     function testRingBufferNegativeCapacity(logger) {
         // -3 must not throw inside `new [negative]`; clamps to a single slot.
         var rb = new RingBuffer(-3);

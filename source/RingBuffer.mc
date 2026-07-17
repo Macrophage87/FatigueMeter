@@ -19,11 +19,21 @@ class RingBuffer {
         // Lazy backbone (#93): start EMPTY and grow to `cap` on push, instead of
         // committing `new [cap]` up front. Cold-start / early-ride heap then tracks
         // ACTUAL fill -- a just-started ride pays for the ~30 samples it holds, not
-        // the full 1200-slot 20-min window. Steady-state peak is unchanged (a full
-        // ride still reaches `cap`); the win is the construction/first-frame moment
-        // (#90's load window) and the tighter-budget devices. All public semantics
-        // (push/toArray/latest/size/isFull/capacity/clear) are byte-for-byte
-        // identical -- only the allocation TIMING moves.
+        // the full 1200-slot 20-min window. The win is the construction/first-frame
+        // moment (#90's load window) and the tighter-budget devices. All public
+        // semantics (push/toArray/latest/size/isFull/capacity/clear) are
+        // byte-for-byte identical -- only the allocation TIMING moves.
+        //
+        // TRADEOFF (honest): Monkey C `Array.add()` grows by exactly ONE element
+        // (no amortized doubling), so during the fill phase every push copies the
+        // current backbone (O(fill) per push, momentarily holding old+new ~2x for
+        // that window) until it reaches `cap`. So the SETTLED full-ride footprint is
+        // identical to the old up-front allocation (no doubling slack), but the
+        // first ~`cap` pushes trade the lower load-instant peak for per-push realloc
+        // churn -- a CPU/GC cost on the 1 Hz path, bounded by current fill, over the
+        // first ~cap seconds. Net-positive for the load window this targets; the
+        // fill-phase peak/CPU is what the #93 per-device Active-Memory profiling
+        // (AC-1, docs/release-checklist.md) must measure, not just the load instant.
         buf = [];
         head = 0;
         count = 0;
