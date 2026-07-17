@@ -15,6 +15,11 @@ class PrimitivesCalculator {
     hidden var winCad;         // last 10 min cadence
     hidden var rrBuf;          // last ~2 min of RR intervals (ms)
 
+    // Pushed into winPower on a sensor dropout (#19). Any negative works: real
+    // power is always >= 0, and NP / coasting / the sufficiency floor treat < 0 as
+    // "no sample this second" rather than a 0 W coast.
+    hidden const POWER_DROPOUT = -1;
+
     // ---- baselines captured over minutes 5..15 ----
     hidden var efBaseline;     // Float or null
     hidden var cadBaseline;    // Float or null
@@ -72,18 +77,31 @@ class PrimitivesCalculator {
     static function normalizedPower(powers) {
         if (powers == null || powers.size() == 0) { return 0.0; }
         var s = 0.0;
+        var n = 0;                       // count of VALID (non-dropout) samples (#19)
         for (var i = 0; i < powers.size(); i++) {
             // #7: promote to Float BEFORE squaring. p*p*p*p in 32-bit int
             // arithmetic wraps at 2.147e9, i.e. p >= 216 W. The += cannot
             // rescue it — p2*p2 has already overflowed by then.
             var pf = powers[i].toFloat();
-            if (pf < 0) { pf = 0.0; }
+            if (pf < 0) { continue; }    // dropout sentinel -> exclude, don't zero (#19)
             var p2 = pf * pf;
             s += p2 * p2;
+            n++;
         }
-        var m = s / powers.size();
+        if (n == 0) { return 0.0; }
+        var m = s / n;                   // 4th-power mean over OBSERVED power (#19)
         if (m <= 0.0) { return 0.0; }
         return Math.pow(m, 0.25);
+    }
+
+    //! Count of VALID (non-dropout, >= 0) power samples in a window. Pure so the
+    //! sufficiency floor is (:test)-drivable off device (#19).
+    static function validCount(powers) {
+        var n = 0;
+        for (var i = 0; i < powers.size(); i++) {
+            if (powers[i] >= 0) { n++; }
+        }
+        return n;
     }
 
     //! Efficiency Factor = NP / meanHR. safeDiv guards HR=0.
@@ -139,8 +157,11 @@ class PrimitivesCalculator {
             if (power > cfg.cp) { kjAboveCpAcc += (power - cfg.cp) / 1000.0; }
             wBal = wprimeBalStep(wBal, power, cfg.cp, cfg.wPrime, 1.0);
         } else {
-            // hold buffers; a dropout is handled by staleness at read time
-            winPower.push(0);
+            // Sensor dropout: push a negative sentinel so NP / coasting / the valid-
+            // sample floor EXCLUDE this second instead of counting it as a real 0 W
+            // coast. There is no read-time staleness path for power, so the old
+            // "handled by staleness at read time" comment was wrong (#19).
+            winPower.push(POWER_DROPOUT);
         }
 
         if (hr != null && hr > 0) { winHr.push(hr); } else { winHr.push(0); }
@@ -253,7 +274,11 @@ class PrimitivesCalculator {
         var efWin = efficiencyFactor(npWin, hrMean);
         var dec = decouplingPct(efBaseline, efWin);
 
-        // steadiness gate
+        // steadiness gate -- but first require enough VALID power samples, else a
+        // mostly-dropout window would read falsely "steady" (#19).
+        if (validCount(pArr) < Constants.MIN_VALID_POWER) {
+            return Signals.Metric.lowConf(dec, 0.3, "sparse power");
+        }
         var cv = MathUtil.coeffOfVariation(nonZeroArray(pArr));
         var coast = coastingFraction(pArr);
         if (cv > cfg.powerCvGate || coast > cfg.coastFracGate) {
@@ -284,6 +309,11 @@ class PrimitivesCalculator {
         }
         // stationarity gate: within-window power CV / coasting
         var pArr = winPower.toArray();
+        // Too few VALID samples can't establish stationarity (#19): with dropouts
+        // now excluded, a mostly-dropout window must not read confidently steady.
+        if (validCount(pArr) < Constants.MIN_VALID_POWER) {
+            return Signals.Metric.lowConf(alpha, 0.25, "sparse power");
+        }
         var cv = MathUtil.coeffOfVariation(nonZeroArray(pArr));
         var coast = coastingFraction(pArr);
         if (cv > cfg.powerCvGate || coast > cfg.coastFracGate) {
@@ -348,20 +378,32 @@ class PrimitivesCalculator {
     //! excitation flag and the advisory's α1 weighting.
     function isStationary() {
         var pArr = winPower.toArray();
-        if (pArr.size() < 30) { return false; }
+        // Floor on VALID samples, not total size (#19): excluding dropouts removes
+        // the 0-fill's accidental protection, so a >~90%-dropout window could read
+        // "steady" off a handful of samples. Require enough observed power first.
+        if (validCount(pArr) < Constants.MIN_VALID_POWER) { return false; }
         var cv = MathUtil.coeffOfVariation(nonZeroArray(pArr));
         var coast = coastingFraction(pArr);
         return (cv <= cfg.powerCvGate) && (coast <= cfg.coastFracGate);
     }
 
-    hidden function coastingFraction(pArr) {
-        if (pArr.size() == 0) { return 0.0; }
-        var coastThresh = 0.05 * cfg.ftp;
+    //! Pure: share of VALID samples below the coast threshold. Dropout sentinels
+    //! (< 0) are excluded from BOTH numerator and denominator; a genuine 0 W coast
+    //! still counts. (:test)-drivable without the instance/cfg (#19).
+    static function coastingFractionOf(pArr, coastThresh) {
         var c = 0;
+        var n = 0;
         for (var i = 0; i < pArr.size(); i++) {
-            if (pArr[i] < coastThresh) { c++; }
+            if (pArr[i] < 0) { continue; }        // dropout -> not a coast, not counted
+            if (pArr[i] < coastThresh) { c++; }   // a genuine 0 W coast still counts
+            n++;
         }
-        return c.toFloat() / pArr.size();
+        if (n == 0) { return 0.0; }
+        return c.toFloat() / n;
+    }
+
+    hidden function coastingFraction(pArr) {
+        return coastingFractionOf(pArr, 0.05 * cfg.ftp);
     }
 
     hidden function nonZeroArray(arr) {

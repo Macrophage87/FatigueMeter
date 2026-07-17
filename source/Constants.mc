@@ -81,6 +81,11 @@ module Constants {
     // that report 0/negative or a 65535-style spike before they enter the filter
     // input u.
     const POWER_SANITY_MAX = 3000.0;   // W
+    // Minimum VALID (non-dropout) power samples in the 10-min window before the
+    // steadiness/stationarity gates will report confident "steady" (#19). With
+    // dropout sentinels excluded, too few observed samples can't establish
+    // stationarity, so the gates fall to low-confidence below this floor.
+    const MIN_VALID_POWER = 30;        // samples (~30 s at 1 Hz)
     // Plausible latent-HR clamp band for x[S_HR]. Floor well below any resting HR;
     // the ceiling used in code is hrMax + HR_STATE_MARGIN, so a genuine max effort
     // is never clipped but a spike/NaN cannot leave latentHr() unbounded.
