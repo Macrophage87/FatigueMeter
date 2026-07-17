@@ -148,6 +148,11 @@ module Constants {
                                      // stop loses at most this window of SUMMARY, not the ride (time-series
                                      // is unaffected). Engineering cadence; ~600 writes/5 h to one key.
 
+    // ---- Degraded-state marker threshold (§8.4; #28) ----
+    const DEGRADED_AFTER = 5;        // consecutive compute() failures before the footer degraded marker
+                                     // shows. ~5 s of uninterrupted 1 Hz failures — long enough to ignore a
+                                     // one-off decode hiccup, short enough to flag a real freeze fast.
+
     // ---- Decoupling / steadiness gate (white paper §3.1) ----
     const EF_BASELINE_START_S = 300;   // baseline window minutes 5..15
     const EF_BASELINE_END_S = 900;
