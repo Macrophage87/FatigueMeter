@@ -11,6 +11,12 @@ using Toybox.Ant;
 //! model-consistency harness (docs/prompts/scientific-validation-prompt.md)
 //! checks behaviour against the documented model — that is regression protection,
 //! not external validity.
+//! (:test) on the MODULE (#92): the whole module -- test functions, the
+//! un-annotated near/posInf helpers, everything -- is included under --unit-test
+//! and stripped from a release build as one unit. See CoverageTests.mc for the
+//! rationale; the check_ciq_tests.py counter tallies only `(:test) function`, so
+//! this module tag is count-neutral.
+(:test)
 module PureFunctionTests {
 
     function near(a, b, tol) {

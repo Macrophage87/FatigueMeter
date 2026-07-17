@@ -143,6 +143,14 @@ running a pre-built Docker image as the job container (see `test` below).
   catches the #90 class of a **non-loading / static-over-budget** release image;
   runtime peak-heap OOM is out of a compiler's reach and stays a release-checklist
   Active-Memory step.
+- **`test-surface`** (advisory, `continue-on-error`, #92) —
+  `scripts/check_test_surface.py` keeps the test surface out of release builds:
+  it asserts every `source/*Tests.mc` module carries a **module-level `(:test)`**
+  (so the whole module — test functions, `Fake*` doubles, and the
+  `near`/`posInf`/`baseStatusCtx` helpers — is stripped from a release build by
+  `excludeAnnotations = test`, while `--unit-test` re-includes it) and warns on new
+  un-annotated `debug`/`fake`/`mock` seams in shipping modules. Advisory until
+  proven false-positive-free, then promotable into `ci-required`.
 - **`store-staleness`** (advisory, `continue-on-error`) —
   `scripts/check_store_fresh.sh` emits a GitHub `::warning::` when tracked source
   (`source/`, `resources/`, `manifest.xml`, `monkey.jungle`) was committed after

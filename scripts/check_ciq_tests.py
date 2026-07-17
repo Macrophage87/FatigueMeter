@@ -34,13 +34,19 @@ import re
 import sys
 
 log = pathlib.Path(sys.argv[1]).read_text(errors="replace")
-# Count (:test) across ALL source modules. Tests live in PureFunctionTests.mc and
-# CoverageTests.mc (#14 split the suite so no single module exhausts the Monkey C
-# type-checker heap). The runner executes (:test) from every module, so `expected`
-# must tally every module too. `(:test)` only appears in test files, so globbing
-# all of source/ is safe and self-maintaining for any future test module.
+# Count (:test) *test functions* across ALL source modules. Tests live in
+# PureFunctionTests.mc and CoverageTests.mc (#14 split the suite so no single
+# module exhausts the Monkey C type-checker heap). The runner executes each
+# (:test) FUNCTION, so `expected` must tally exactly those.
+#
+# Match `(:test)` only when it annotates a `function` (#92). `\s+` spans the
+# newline, so the canonical `(:test)`-on-its-own-line-then-`function` form still
+# counts; a `(:test)` on a `module`/`class` line (as #92 puts on the two test
+# modules to strip the whole test surface from release builds) does NOT -- so the
+# module tags stay count-neutral. This is also robust to any future non-function
+# `(:test)` tag, exactly the mis-tally the docstring above warns about.
 expected = sum(
-    len(re.findall(r"^\s*\(:test\)", f.read_text(errors="replace"), re.M))
+    len(re.findall(r"\(:test\)\s+function\s+\w", f.read_text(errors="replace")))
     for f in sorted(pathlib.Path("source").glob("*.mc"))
 )
 

@@ -9,3 +9,11 @@ project.manifest = manifest.xml
 
 base.sourcePath = source
 base.resourcePath = resources
+
+# Strip the test surface from RELEASE builds (#92). Everything tagged `(:test)`
+# -- the whole CoverageTests / PureFunctionTests modules (functions + Fake*
+# doubles + near/posInf/baseStatusCtx helpers) -- is excluded from a normal
+# build; `--unit-test` re-includes it, which is why the required `simulate` gate
+# still runs the suite (if this stripped the test build too, `simulate` would run
+# 0 tests and go RED). Belt-and-suspenders with the `(:test)` auto-exclusion.
+base.excludeAnnotations = test
