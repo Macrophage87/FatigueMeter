@@ -31,6 +31,7 @@ class SessionStore {
 
     hidden const KEY = "fm_sessions_v1";
     hidden const KEY_BAK = "fm_sessions_v1_bak";   // retired; deleted once on load
+    hidden const KEY_ACTIVE = "fm_active_v1";      // in-progress ride snapshot (#17)
     hidden const MAX_HISTORY = 20;
     hidden const MIN_HISTORY = 1;   // shed-until-fits floor: never drop below the just-finished ride (#62)
 
@@ -51,6 +52,7 @@ class SessionStore {
         // one), so the old primary+backup dance bought nothing. Delete any legacy
         // backup once so it can't linger as dead storage.
         try { Storage.deleteValue(KEY_BAK); } catch (e) { }
+        reconcileActive();   // recover a ride whose onStop never fired (#17)
     }
 
     hidden function read(key) {
@@ -116,6 +118,64 @@ class SessionStore {
     //! Shed another record only while above the floor. Pure so the floor guard is
     //! (:test)-drivable without Storage (#62).
     static function shouldShed(size, floor) { return size > floor; }
+
+    // ---- In-progress checkpoint + reconcile (issue #17) -------------------
+    // A ride's summary (session FIT fields + the one history row) is written
+    // only by finalizeSession()->onStop, so an ungraceful stop (battery pull /
+    // crash / OS kill) loses it. These persist a durable snapshot of the running
+    // summary under a SINGLE dedicated key (never through append(), which would
+    // churn the MAX_HISTORY ring), and commit it to history on the next load().
+
+    //! Durable in-progress snapshot: one dict under one key, overwritten in place
+    //! (O(1) storage, no history growth). `result` must carry a stable
+    //! "sessionToken" so reconcile can dedup it against an already-committed row.
+    function checkpoint(result) { try { Storage.setValue(KEY_ACTIVE, result); } catch (e) { } }
+
+    //! Drop the in-progress snapshot (graceful stop committed the real row).
+    function clearActive() { try { Storage.deleteValue(KEY_ACTIVE); } catch (e) { } }
+
+    //! If a prior ride ended ungracefully its last checkpoint is still in Storage.
+    //! Commit it once, stamp `recovered`, and clear KEY_ACTIVE ONLY on a durable
+    //! write -- a failed persist keeps the slot so the next load() retries, never
+    //! deleting the sole surviving copy of a recovered ride (#17). Because the
+    //! recovered row is add()-ed LAST, persist()'s shed-until-fits (#62) drops
+    //! oldest history first and structurally protects it, returning false only at
+    //! the MIN_HISTORY floor. Decision is the pure shouldRecover() seam; the
+    //! sessionToken dedup closes the append->clearActive crash window.
+    hidden function reconcileActive() {
+        var a = read(KEY_ACTIVE);
+        if (shouldRecover(a, history)) {
+            var d = a as Lang.Dictionary;
+            d.put("recovered", true);   // rebuilt from the last checkpoint (<=1 cadence stale)
+            history.add(d);
+            while (history.size() > MAX_HISTORY) { history.remove(history[0]); }
+            if (persist()) {
+                clearActive();          // durably in history -- safe to drop the checkpoint
+            } else {
+                writeFailed = true;     // surface via lastWriteFailed(); KEY_ACTIVE survives -> retried next load()
+            }
+        } else {
+            clearActive();              // invalid / already-committed / token-less -> drop the stale slot
+        }
+    }
+
+    //! Pure: recover this snapshot iff it is a valid Session Result carrying a
+    //! sessionToken not already committed (#17). isValidRecord already gates the
+    //! _v/shape, so a garbage or foreign value is rejected here.
+    static function shouldRecover(active, hist) {
+        if (!isValidRecord(active)) { return false; }
+        var token = (active as Lang.Dictionary)["sessionToken"];
+        if (token == null) { return false; }
+        return !tokenInHistory(hist, token);
+    }
+
+    //! Pure: is `token` already on a committed history row? Scans newest-first.
+    static function tokenInHistory(hist, token) {
+        for (var i = hist.size() - 1; i >= 0; i--) {
+            if ((hist[i] as Lang.Dictionary)["sessionToken"] == token) { return true; }
+        }
+        return false;
+    }
 
     //! True if the most recent append() could not be persisted to storage.
     function lastWriteFailed() { return writeFailed; }

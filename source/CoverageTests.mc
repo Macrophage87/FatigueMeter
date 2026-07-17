@@ -609,6 +609,46 @@ module CoverageTests {
         return okAbove && okAt && okBelow;
     }
 
+    // ---- In-progress checkpoint recovery + dedup (#17) ----
+    (:test)
+    function testShouldRecoverFreshToken(logger) {
+        // Valid snapshot, token not in history -> recover.
+        var a = SessionStore.buildResult(1,3600,50.0,8.0,42.0, 0.0,0.0,0.0,0.0, 0.0,0.0,0.0,0,0.0, "moderate",5.0);
+        a.put("sessionToken", 12345);
+        return SessionStore.shouldRecover(a, []) == true;
+    }
+
+    (:test)
+    function testShouldRecoverSkipsCommittedToken(logger) {
+        // Token already on a history row -> no double-add (graceful append->crash window).
+        var committed = SessionStore.buildResult(1,3600,50.0,8.0,42.0, 0.0,0.0,0.0,0.0, 0.0,0.0,0.0,0,0.0, "moderate",5.0);
+        committed.put("sessionToken", 777);
+        var hist = []; hist.add(committed);
+        var a = SessionStore.buildResult(2,60,1.0,0.0,0.0, 0.0,0.0,0.0,0.0, 0.0,0.0,0.0,0,0.0, "fresh",0.0);
+        a.put("sessionToken", 777);
+        return SessionStore.shouldRecover(a, hist) == false;
+    }
+
+    (:test)
+    function testShouldRecoverRejectsTokenlessOrInvalid(logger) {
+        // A valid record with NO token can't be deduped -> reject; garbage -> reject.
+        var noTok = SessionStore.buildResult(1,3600,50.0,8.0,42.0, 0.0,0.0,0.0,0.0, 0.0,0.0,0.0,0,0.0, "moderate",5.0);
+        var okNoTok   = (SessionStore.shouldRecover(noTok, []) == false);
+        var okGarbage = (SessionStore.shouldRecover("not a dict", []) == false);
+        return okNoTok && okGarbage;
+    }
+
+    (:test)
+    function testSessionTokenSurvivesSanitizeRoundTrip(logger) {
+        // Dedup keystone (#17): sessionToken must survive load()'s sanitize() so a
+        // committed row is matchable by tokenInHistory on the next start.
+        var r = SessionStore.buildResult(1,3600,50.0,8.0,42.0, 0.0,0.0,0.0,0.0, 0.0,0.0,0.0,0,0.0, "moderate",5.0);
+        r.put("sessionToken", 4242);
+        var raw = []; raw.add(r);
+        var cleaned = SessionStore.sanitize(raw);        // migrate + isValidRecord, as load() does
+        return (cleaned.size() == 1) && SessionStore.tokenInHistory(cleaned, 4242);
+    }
+
     // ---- TrainingLoadLedger day-index + real-dt (#22) and ewmaFold guard (#34a) ----
     // NOTE: the caller-side pause->dt=0 decision lives in FatigueMeterView.computeInner
     // (view loop) and is verified by reasoning, not a pure unit test -- it needs an
