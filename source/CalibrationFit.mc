@@ -59,16 +59,26 @@ module CalibrationFit {
         // Accept only when R², slope, AND an in-range crossing all hold.
         var accepted = (r2 > Constants.DFA_R2_GATE) && slopeOk && crossingOk;
 
-        // map linear slope onto the sigmoid slope parameter s (falling sigmoid's
-        // derivative at centre ≈ -a1·s/4 ; solve s ≈ -4·slope/a1). NOTE: the SIG_A1
-        // divisor is left unguarded here on purpose -- that hardening is owned by
-        // #34 (SIG_A1 is a fixed nonzero constant today, so it is safe as-is).
+        // map linear slope onto the sigmoid slope parameter s via the guarded
+        // sigmoidSlope() seam (#34b): a zero/non-finite a1 (SIG_A1) yields the
+        // 0.001 floor instead of Inf/NaN, which the bare `s < 0.001` clamp misses.
         var a1 = Constants.SIG_A1;
-        var s = -4.0 * slope / a1;
-        if (s < 0.001) { s = 0.001; }
+        var s = sigmoidSlope(slope, a1);
 
         return { "accepted" => accepted, "r2" => r2, "pAeT" => pAeT,
                  "slope" => slope, "a0" => Constants.SIG_A0, "a1" => a1, "s" => s };
+    }
+
+    //! Map the linear fit slope onto the falling-sigmoid slope parameter s
+    //! (derivative at centre ≈ -a1·s/4  ->  s ≈ -4·slope/a1), floored to a usable
+    //! positive slope. Guarded via MathUtil.safeDiv so a ZERO or NaN divisor a1
+    //! (SIG_A1) yields the 0.001 floor instead of Inf/NaN — the bare `s < 0.001`
+    //! clamp does NOT catch NaN (NaN < 0.001 is false). Pure seam so the guard is
+    //! (:test)-drivable without mutating the SIG_A1 build constant (#34b).
+    function sigmoidSlope(slope, a1) {
+        var s = MathUtil.safeDiv(-4.0 * slope, a1, 0.001);
+        if (s < 0.001) { s = 0.001; }
+        return s;
     }
 
     //! [min, max] of a non-empty numeric array (single pass). Callers guarantee
