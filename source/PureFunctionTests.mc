@@ -852,6 +852,27 @@ module PureFunctionTests {
     }
 
     (:test)
+    function testShouldShowDegraded(logger) {
+        // #28: the degraded footer marker fires only once the consecutive-failure
+        // streak reaches the threshold.
+        var okBelow = (FatigueMeterView.shouldShowDegraded(4, 5) == false);   // one under threshold
+        var okAt    = (FatigueMeterView.shouldShowDegraded(5, 5) == true);    // reaches threshold
+        var okZero  = (FatigueMeterView.shouldShowDegraded(0, 5) == false);   // no fault = not degraded
+        return okBelow && okAt && okZero;
+    }
+
+    (:test)
+    function testNextFailStreakResetsOnSuccess(logger) {
+        // #28: the load-bearing reset-on-success invariant — a throw increments the
+        // streak, but any good tick clears it to 0, so a lone bad frame never latches
+        // the marker (and a normal no-fault tick keeps the streak at 0 == not degraded).
+        var afterTwoFails = FatigueMeterView.nextFailStreak(
+                                FatigueMeterView.nextFailStreak(0, true), true);   // 0 -> 1 -> 2
+        var afterGoodTick = FatigueMeterView.nextFailStreak(afterTwoFails, false); // -> 0
+        return afterTwoFails == 2 && afterGoodTick == 0;
+    }
+
+    (:test)
     function testAntShouldReopenPredicate(logger) {
         // #47: the self-heal reopen DECISION extracted from AntHrm.onAntMessage as
         // a pure static predicate (AntHrm extends Ant.GenericChannel, so it can't

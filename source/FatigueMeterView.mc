@@ -56,6 +56,7 @@ class FatigueMeterView extends WatchUi.DataField {
     hidden var dStationary;
     hidden var dWriteFailed;   // last session append could not persist (#18); footer surfacing tracked with #28
     hidden var dStrapHr;       // strap-HR staleness Metric — DISPLAY ONLY (#57); never fed to the filter/math
+    hidden var computeFailStreak;   // consecutive compute() failures; drives the degraded footer marker (#28)
 
     //! Conservative NODATA defaults written at construction BEFORE the guarded
     //! collaborator build (§8.4, #13): if that build throws, the field is left on
@@ -105,6 +106,15 @@ class FatigueMeterView extends WatchUi.DataField {
                                                        : ("strap " + v);
     }
 
+    //! Pure: next consecutive compute()-failure streak (#28). A good tick
+    //! (threw == false) resets to 0; a throw increments — so only a PERSISTENT
+    //! per-tick fault latches the degraded marker, never a one-off frame.
+    static function nextFailStreak(prev, threw) { return threw ? (prev + 1) : 0; }
+
+    //! Pure: does a persistent compute-stall warrant the footer degraded marker?
+    //! True once the streak reaches the threshold (#28).
+    static function shouldShowDegraded(streak, threshold) { return streak >= threshold; }
+
     function initialize() {
         DataField.initialize();
         ready = false;
@@ -121,6 +131,7 @@ class FatigueMeterView extends WatchUi.DataField {
         sessionToken = Time.now().value();   // stable per-ride id (ride-start epoch s) for reconcile dedup (#17)
         lastCheckpointTick = 0;
         dWriteFailed = false;
+        computeFailStreak = 0;   // #28: no compute failures yet
         peakAfi = 0.0;
         lastFreshMatchCount = 0;
 
@@ -214,8 +225,13 @@ class FatigueMeterView extends WatchUi.DataField {
         // here blanks the field to the Connect IQ banner and stops all logging.
         try {
             computeInner(info);
+            computeFailStreak = nextFailStreak(computeFailStreak, false);   // a good tick clears the latch
         } catch (e) {
-            // swallow: keep the field alive; the last good snapshot stays on screen
+            // swallow: keep the field alive; the last good snapshot stays on screen.
+            // Count it (INSIDE-try reset above; increment here) so a persistent
+            // per-tick fault (e.g. a NaN-poisoned filter) surfaces a degraded footer
+            // marker instead of freezing silently on a stale snapshot (#28).
+            computeFailStreak = nextFailStreak(computeFailStreak, true);
         }
     }
 
@@ -663,6 +679,13 @@ class FatigueMeterView extends WatchUi.DataField {
     }
 
     hidden function footerText() {
+        // A persistent compute stall outranks the normal data-quality line so the
+        // field can't sit frozen on a stale snapshot with no indication (#28). The
+        // parenthesised count self-diagnoses: climbing every second = hard freeze;
+        // small and cleared = transient.
+        if (shouldShowDegraded(computeFailStreak, Constants.DEGRADED_AFTER)) {
+            return DescriptiveStrings.degradedTag() + " (" + computeFailStreak.format("%d") + ")";
+        }
         var steady = dStationary ? "steady" : "variable";
         if (dArtifact == null) { return "no RR — decoupling-only  ·  " + steady; }
         var q = "";
