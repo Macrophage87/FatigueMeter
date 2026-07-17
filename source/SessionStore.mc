@@ -87,24 +87,30 @@ class SessionStore {
     //! swallow the quota case and defeat shedding entirely.
     hidden function persist() {
         shed = false;
-        var working = [];                                    // shallow copy of history
+        // `as Lang.Array` so the copy is a general Array, not the zero-length
+        // `Array[]` the type-checker infers for a bare `[]` literal (which rejects
+        // index reads like working[0]).
+        var working = [] as Lang.Array;                      // shallow copy of history
         for (var i = 0; i < history.size(); i++) { working.add(history[i]); }
         var dropped = 0;
-        while (true) {
+        // Bounded: each failed attempt sheds one record; the shouldShed() floor
+        // guard breaks at MIN_HISTORY. The condition is always true in practice
+        // (working starts non-empty) but is written falsifiable so the trailing
+        // return is reachable -- a bare while(true) trips "not all code paths return".
+        while (working.size() > 0) {
             try {
                 Storage.setValue(KEY, working);
                 if (dropped > 0) { history = working; shed = true; }   // commit the shrink on success only
                 return true;
             } catch (e) {
-                if (!shouldShed(working.size(), MIN_HISTORY)) {
-                    System.println("SessionStore: persist failed at floor; kept full history in RAM");
-                    return false;
-                }
+                if (!shouldShed(working.size(), MIN_HISTORY)) { break; }
                 working.remove(working[0]);   // drop oldest from the COPY, retry smaller
                 dropped++;
                 System.println("SessionStore: store full — shed oldest, retry (n=" + working.size() + ")");
             }
         }
+        System.println("SessionStore: persist failed at floor; kept full history in RAM");
+        return false;
     }
 
     //! Shed another record only while above the floor. Pure so the floor guard is
