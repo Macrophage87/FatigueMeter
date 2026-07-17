@@ -147,9 +147,11 @@ running a pre-built Docker image as the job container (see `test` below).
   `scripts/check_test_surface.py` keeps the test surface out of release builds:
   it asserts every `source/*Tests.mc` module carries a **module-level `(:test)`**
   (so the whole module — test functions, `Fake*` doubles, and the
-  `near`/`posInf`/`baseStatusCtx` helpers — is stripped from a release build by
-  `excludeAnnotations = test`, while `--unit-test` re-includes it) and warns on new
-  un-annotated `debug`/`fake`/`mock` seams in shipping modules. Advisory until
+  `near`/`posInf`/`baseStatusCtx` helpers — is dropped from a release build by the
+  toolchain's built-in `(:test)` auto-exclusion, while `--unit-test` includes it;
+  note `excludeAnnotations = test` is **not** used — on SDK 9.2.0 it strips the
+  test build too) and warns on new un-annotated `debug`/`fake`/`mock` seams in
+  shipping modules. Advisory until
   proven false-positive-free, then promotable into `ci-required`.
 - **`store-staleness`** (advisory, `continue-on-error`) —
   `scripts/check_store_fresh.sh` emits a GitHub `::warning::` when tracked source

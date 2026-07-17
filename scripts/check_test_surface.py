@@ -6,10 +6,13 @@ Two structural guards so the dead-code leak #92 fixed cannot silently return:
 1. (HARD) Every `source/*Tests.mc` module MUST carry a module-level `(:test)`
    annotation, so its ENTIRE contents -- test functions + `Fake*` doubles +
    `near`/`posInf`/`baseStatusCtx` helpers -- are one build-conditional unit that
-   `excludeAnnotations = test` strips from release builds. A test module that
-   loses that tag would leak its un-annotated top-level symbols again. This is the
-   POSITIVE residue-absence check: it verifies the mechanism is in place rather
-   than trusting a green compile (both release and test builds compile either way).
+   the toolchain's built-in `(:test)` auto-exclusion drops from a release build
+   (a non---unit-test build strips `(:test)` symbols; `--unit-test` includes them).
+   (`excludeAnnotations = test` is deliberately NOT used -- on SDK 9.2.0 it strips
+   the `--unit-test` build too, running 0 tests.) A test module that loses the tag
+   would leak its un-annotated top-level symbols again. This is the POSITIVE
+   residue-absence check: it verifies the mechanism is in place rather than
+   trusting a green compile (both release and test builds compile either way).
 
 2. (WARN) Shipping modules (non-`*Tests.mc`) must not gain NEW un-annotated
    test-only seams (`debug*`/`fake*`/`mock*` helpers). The one known, unavoidable
