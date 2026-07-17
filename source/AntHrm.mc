@@ -17,6 +17,10 @@ using Toybox.System;   // System.getTimer(): monotonic ms-since-boot staleness c
 //! Requires <iq:uses-permission id="Ant"/>. Needs an ANT+ HR strap (Polar H10
 //! class). BLE-only straps are not reachable this way; without a strap the
 //! channel simply never delivers data and the app runs decoupling-only (§8.4).
+//! Integration coverage (#81): the Ant.GenericChannel + System-clock path (RR
+//! acquisition, staleness transitions, watchdog re-open) is verified per-release
+//! on real hardware — see docs/release-checklist.md (the pure decode/reopen/
+//! staleness predicates rrDelta/shouldReopen/stallExpired/hrByteValid ARE tested).
 class AntHrm extends Ant.GenericChannel {
 
     // ANT+ HRM device profile
