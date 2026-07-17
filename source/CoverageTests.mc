@@ -488,6 +488,52 @@ module CoverageTests {
         return okNo && okWith && okNeg;
     }
 
+    // ---- EffortCharacterizer STATEFUL path + BestEffort (#14 residual, #75) ----
+    // The pure statics above are covered; these pin the state machine (evidence-
+    // only: it labels the KIND of red, never gates the band). Instances build
+    // off-device (no Storage/Sensor/WatchUi), like the many new Config() tests.
+    (:test)
+    function testBestEffortFillsThenTracksMaximal(logger) {
+        // Mean-maximal tracker: best stays 0 until the window fills, then tracks
+        // the max windowed mean with O(1) sum/eviction.
+        var be = new BestEffort(3);
+        be.add(100.0); be.add(100.0);          // window not full -> best 0
+        var beforeFull = be.best();
+        be.add(100.0);                         // full -> mean 100
+        var atFull = be.best();
+        be.add(400.0); be.add(400.0); be.add(400.0);   // window now all 400 -> mean 400
+        return near(beforeFull, 0.0, 1e-9) && near(atFull, 100.0, 1e-9)
+            && near(be.best(), 400.0, 1e-9);
+    }
+
+    (:test)
+    function testEffortMatchClosesOnRecovery(logger) {
+        // W' "match": W'bal fraction drops below WPRIME_MATCH_FRAC (0.20) then
+        // recovers above 0.5 -> exactly one match burned.
+        var eff = new EffortCharacterizer(new Config());
+        eff.update(300.0, 0.05, 0.0, 0.0, 0.0);   // enter match (0.05 < 0.20)
+        eff.update(300.0, 0.60, 0.0, 0.0, 0.0);   // recover (0.60 > 0.5) -> close
+        return eff.matchesBurned() == 1;
+    }
+
+    (:test)
+    function testAccrueRedSecondSplitsFeatVsAttrition(logger) {
+        // A red second is feat when power > cp (default 240) or a fresh match,
+        // else attrition.
+        var eff = new EffortCharacterizer(new Config());
+        eff.accrueRedSecond(300.0, false);    // power > cp -> feat
+        eff.accrueRedSecond(100.0, false);    // power < cp, no fresh match -> attrition
+        return eff.redFeatSeconds() == 1 && eff.redAttritionSeconds() == 1;
+    }
+
+    (:test)
+    function testRedCharacterNeutralWhenNoEvidence(logger) {
+        // Fresh characterizer: both scores 0 -> "none" (never fabricates a label).
+        var eff = new EffortCharacterizer(new Config());
+        var rk = eff.redCharacter(0.0, 0.0) as Lang.String;
+        return rk.equals("none");
+    }
+
     // ---- StatusEvaluator null-guard hardening (#10) ----
     // Each test isolates ONE of the three guards so a regression in one can't be
     // masked by another. #53's testStatusNoSensorsIsNoData already covers explicit
