@@ -33,6 +33,8 @@ class AntHrm extends Ant.GenericChannel {
     hidden var lastHr;          // last VALID HR (bpm); 0 / no-contact is NEVER stored here (#11)
     hidden var hasHr;           // true once a non-zero HR page has been decoded (#11)
     hidden var lastHrMs;        // System.getTimer() at the last VALID HR page (staleness clock, #11)
+    hidden var lastPageMs;      // System.getTimer() of the last DECODED page (stall-watchdog key, #24)
+    hidden var decodeErrors;    // latched count of swallowed decode/callback failures (#24)
 
     function initialize() {
         var assign = new Ant.ChannelAssignment(Ant.CHANNEL_TYPE_RX_ONLY, Ant.NETWORK_PLUS);
@@ -44,6 +46,8 @@ class AntHrm extends Ant.GenericChannel {
         lastHr = 0;
         hasHr = false;
         lastHrMs = -1;
+        lastPageMs = System.getTimer();   // seed so stallExpired() never does null arithmetic (#24)
+        decodeErrors = 0;
         opened = false;
         closing = false;
 
@@ -62,7 +66,9 @@ class AntHrm extends Ant.GenericChannel {
     //! Open the channel. Returns true on success. Never throws to the caller.
     function start() {
         closing = false;                 // a fresh open cancels any prior teardown intent
+        havePrev = false;                // never bridge beat state across an open (#24)
         try { opened = GenericChannel.open(); } catch (e) { opened = false; }
+        lastPageMs = System.getTimer();  // arm the watchdog from open time (#24)
         return opened;
     }
 
@@ -98,9 +104,53 @@ class AntHrm extends Ant.GenericChannel {
     //! Return the RR intervals (ms) buffered since the last call, and clear the
     //! buffer. Called once per second by the compute loop.
     function drainRr() {
+        // Stall watchdog (#24): RX-fail / search-timeout can wedge the strap WITHOUT
+        // emitting CHANNEL_CLOSED. If open but no PAGE has decoded for RR_WATCHDOG_MS
+        // (keyed on pages, not RR, so an ectopy/interference channel isn't restarted),
+        // force a controlled close+re-open. Window > the ~30 s search so it can't
+        // abort acquisition; it does NOT pre-empt the 10 s alpha1 grey.
+        if (opened && stallExpired(System.getTimer(), lastPageMs, Constants.RR_WATCHDOG_MS)) {
+            watchdogReopen();
+        }
         var out = rr;
         rr = [];
         return out;
+    }
+
+    //! Has the channel gone silent past the window? Pure so the watchdog gate is
+    //! (:test)-drivable without the Ant runtime (#24).
+    static function stallExpired(nowMs, lastPageMs, windowMs) {
+        return (nowMs - lastPageMs) >= windowMs;
+    }
+
+    //! Drop the oldest element once the buffer is at capacity (memory bound for a
+    //! stalled compute loop). Pure/(:test)-drivable (#24).
+    static function capOldest(arr, max) {
+        return (arr.size() >= max) ? arr.slice(1, null) : arr;
+    }
+
+    //! EVENT path re-open (a genuine CHANNEL_CLOSED): the stack already closed the
+    //! channel, so just re-arm -- no redundant close() (that would raise ANOTHER
+    //! CHANNEL_CLOSED). Drops beat state so a gap is never bridged into a fabricated
+    //! RR, and refreshes `opened` from open()'s result WITHOUT downgrading it to
+    //! false on an already-open no-op (an async CHANNEL_CLOSED from watchdogReopen's
+    //! close() can re-enter here after the re-open; open()-on-open returning false
+    //! must not stick `opened=false` and silently disable the watchdog, #24).
+    hidden function reopenFromEvent() {
+        havePrev = false;
+        try { if (GenericChannel.open()) { opened = true; } } catch (e) { }
+        lastPageMs = System.getTimer();
+    }
+
+    //! WATCHDOG path re-open: the channel is open-but-wedged, so close then re-arm.
+    //! `closing=true` across the close() suppresses that close()'s SYNCHRONOUS
+    //! CHANNEL_CLOSED via shouldReopen; an async one lands on reopenFromEvent() as a
+    //! single benign caught open()-on-open (#24).
+    hidden function watchdogReopen() {
+        closing = true;
+        try { GenericChannel.close(); } catch (e) { }
+        closing = false;
+        reopenFromEvent();
     }
 
     //! Should a channel-response event trigger the self-heal re-open? True only
@@ -128,11 +178,17 @@ class AntHrm extends Ant.GenericChannel {
                 decode(msg.getPayload());
             } else if (shouldReopen(id, msg.getPayload(), closing)) {
                 // Self-heal a dropout by re-opening. shouldReopen() already
-                // excludes a deliberate release()'s own close event (#47).
-                try { GenericChannel.open(); } catch (e) { }
+                // excludes a deliberate release()'s own close event (#47); the
+                // event-path re-open drops beat state + refreshes `opened` (#24).
+                reopenFromEvent();
             }
-        } catch (e) { }
+        } catch (e) {
+            decodeErrors++;   // latch a persistent fault instead of hiding it (#24)
+        }
     }
+
+    //! Latched count of swallowed decode/callback failures (telemetry, #24).
+    function decodeErrorCount() { return decodeErrors; }
 
     //! Decode one HRM broadcast page. Bytes 4-5 = heart-beat event time (1/1024 s,
     //! rolls at 65536); byte 6 = heart-beat count (rolls at 256); byte 7 = HR.
@@ -141,6 +197,11 @@ class AntHrm extends Ant.GenericChannel {
     //! gate handles) rather than fabricate an interval.
     hidden function decode(d) {
         if (d == null || d.size() < 8) { return; }
+        lastPageMs = System.getTimer();   // watchdog key: a valid page arrived (#24)
+        // A decoded page is proof the channel is open and receiving; refresh `opened`
+        // so a transient stuck-false (async double-open, #24) self-corrects. Gated on
+        // !closing so a stray queued page can't resurrect a channel after stop().
+        if (!closing) { opened = true; }
         // Byte 7 == 0 means loss of skin contact / no reading: never let it
         // overwrite a good HR, and never surface it as a usable value (#11). RR
         // reconstruction (bytes 4/5/6) is independent of byte 7 and unaffected.
@@ -157,15 +218,34 @@ class AntHrm extends Ant.GenericChannel {
             havePrev = true;
             return;
         }
+        var res = rrDelta(prevTime, prevCount, beatTime, beatCount);
+        if (res[0] == 0) { return; }                   // DUP: keep baseline, no RR
+        if (res[0] == 2) { havePrev = false; return; } // RESYNC: reorder/huge gap -> rebaseline next page
+        if (res[1] != null) {                          // ADVANCE: emit iff a plausible RR
+            rr = capOldest(rr, Constants.RR_BUF_MAX);
+            rr.add(res[1]);
+        }
+        prevTime = beatTime;                           // advance forward only
+        prevCount = beatCount;
+    }
+
+    //! Pure beat-count/time classifier (extracted so the wrap arithmetic is
+    //! (:test)-drivable without the Ant runtime, #24). Returns [action, rrMs]:
+    //!   0 DUP     (dCount==0)                 keep baseline, no RR
+    //!   1 ADVANCE (1 <= dCount < RR_FWD_MAX)  move baseline forward; rrMs = plausible
+    //!                                         RR iff dCount==1 & in-window, else null
+    //!   2 RESYNC  (dCount >= RR_FWD_MAX)      reorder OR huge gap -> caller drops the
+    //!                                         baseline; never rolls prev* backward
+    static function rrDelta(prevTime, prevCount, beatTime, beatCount) {
         var dCount = (beatCount - prevCount) & 0xFF;
+        if (dCount == 0) { return [0, null]; }
+        if (dCount >= Constants.RR_FWD_MAX) { return [2, null]; }
+        var rrMs = null;
         if (dCount == 1) {
             var dt = (beatTime - prevTime) & 0xFFFF;   // 1/1024 s
             var ms = dt * 1000 / 1024;
-            if (ms >= 250 && ms <= 2200) { rr.add(ms); }   // 27-240 bpm plausibility
+            if (ms >= 250 && ms <= 2200) { rrMs = ms; }   // 27-240 bpm plausibility
         }
-        if (dCount >= 1) {
-            prevTime = beatTime;
-            prevCount = beatCount;
-        }
+        return [1, rrMs];
     }
 }

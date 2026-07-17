@@ -133,6 +133,10 @@ module Constants {
     // ---- HRM staleness (§8.4 staleness timer, mirror of RR_STALE_S) (#11) ----
     const HR_STALE_S = 5;          // no fresh HR page for this long -> hold value but mark STALE
     const HR_UNAVAIL_S = 15;       // no fresh HR page for this long -> HR UNAVAILABLE
+    // ---- ANT+ RR lifecycle (engineering conventions / glitch-rejection) (#24) ----
+    const RR_FWD_MAX = 16;         // max forward beat-count step still treated as in-sync (else RESYNC)
+    const RR_WATCHDOG_MS = 40000;  // no decoded page this long while open -> forced channel restart (> ~30 s search)
+    const RR_BUF_MAX = 256;        // cap the buffered RR list if the compute loop stalls (drop oldest)
 
     // ---- Decoupling / steadiness gate (white paper §3.1) ----
     const EF_BASELINE_START_S = 300;   // baseline window minutes 5..15

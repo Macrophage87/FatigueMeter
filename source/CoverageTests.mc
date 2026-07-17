@@ -20,8 +20,10 @@ using Toybox.Math;
 //! SCOPE (honest, per review): this suite covers the PURE / near-pure surface,
 //! INCLUDING EffortCharacterizer's featScore/attritionScore pure statics (added
 //! below). What remains genuinely needs hardware or an integration harness, NOT
-//! this pure suite: AntHrm channel lifecycle (its pure shouldReopen predicate IS
-//! covered in PureFunctionTests), FitLogger's FitContributor field creation +
+//! this pure suite: AntHrm channel lifecycle — the reopen paths + stall-watchdog
+//! RESTART are channel-bound (integration/on-device), but its pure decode/lifecycle
+//! statics ARE covered (shouldReopen in PureFunctionTests; rrDelta / stallExpired /
+//! capOldest below, #24), FitLogger's FitContributor field creation +
 //! setData (its pure deriveOk partial-success rule IS covered below, #20),
 //! SessionStore's Storage-backed load/append/persist (its pure sanitize / migrate
 //! / isValidRecord / buildResult validators ARE covered below, #18, and the
@@ -626,5 +628,63 @@ module CoverageTests {
         var guarded = TrainingLoadLedger.ewmaFold(5.0, 10.0, 0.0);   // tau 0 -> prev
         var normal  = TrainingLoadLedger.ewmaFold(0.0, 10.0, 2.0);   // 0 + 10/2
         return near(guarded, 5.0, 1e-9) && near(normal, 5.0, 1e-9);
+    }
+
+    // ---- AntHrm RR state machine + lifecycle statics (#24) ----
+    // AntHrm extends Ant.GenericChannel and can't be built in the pure harness, so
+    // the beat arithmetic / watchdog gate / buffer cap are extracted as pure statics
+    // (the shouldReopen precedent). The reopen paths + watchdog restart themselves
+    // are channel-bound -> integration/on-device, noted in the SCOPE block above.
+    (:test)
+    function testRrDeltaEmitsInWindow(logger) {
+        var r = AntHrm.rrDelta(1000, 40, 1820, 41);     // dCount 1, 820 ticks -> 800 ms
+        return r[0] == 1 && r[1] == 800;
+    }
+    (:test)
+    function testRrDeltaDropsHighImplausible(logger) {
+        var r = AntHrm.rrDelta(1000, 40, 6120, 41);     // 5120 ticks -> 5000 ms > 2200
+        return r[0] == 1 && r[1] == null;
+    }
+    (:test)
+    function testRrDeltaDropsLowImplausible(logger) {
+        var r = AntHrm.rrDelta(1000, 40, 1100, 41);     // 100 ticks -> ~97 ms < 250
+        return r[0] == 1 && r[1] == null;
+    }
+    (:test)
+    function testRrDeltaAdvanceMidBand(logger) {
+        var r = AntHrm.rrDelta(1000, 40, 1820, 45);     // dCount 5: advance, no emit
+        return r[0] == 1 && r[1] == null;
+    }
+    (:test)
+    function testRrDeltaFwdMaxBoundary(logger) {
+        var a = AntHrm.rrDelta(1000, 40, 1820, 55);     // dCount 15 -> ADVANCE
+        var b = AntHrm.rrDelta(1000, 40, 1820, 56);     // dCount 16 -> RESYNC
+        return a[0] == 1 && b[0] == 2;
+    }
+    (:test)
+    function testRrDeltaDuplicateKeepsState(logger) {
+        var r = AntHrm.rrDelta(1000, 40, 1234, 40);     // dCount 0 -> DUP
+        return r[0] == 0 && r[1] == null;
+    }
+    (:test)
+    function testRrDeltaReorderResyncs(logger) {
+        var r = AntHrm.rrDelta(1000, 40, 900, 37);      // (37-40)&0xFF = 253 -> RESYNC
+        return r[0] == 2 && r[1] == null;               // never adopts the stale 37
+    }
+    (:test)
+    function testStallExpiredBoundary(logger) {
+        var okAt  = (AntHrm.stallExpired(40000, 0, 40000) == true);    // >= boundary
+        var okBel = (AntHrm.stallExpired(39999, 0, 40000) == false);
+        return okAt && okBel;
+    }
+    (:test)
+    function testCapOldestDropsWhenFull(logger) {
+        var full = [] as Lang.Array;                    // build via add() (avoid zero-length [] index)
+        for (var i = 0; i < 4; i++) { full.add(i); }
+        var c = AntHrm.capOldest(full, 4);              // at cap -> drop oldest
+        var okFull = (c.size() == 3) && (c[0] == 1);
+        var under = [9] as Lang.Array;
+        var okUnder = (AntHrm.capOldest(under, 4).size() == 1);   // under cap -> unchanged
+        return okFull && okUnder;
     }
 }
