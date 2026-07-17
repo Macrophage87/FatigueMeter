@@ -45,7 +45,6 @@
                  listener, so (like the alphaHRV field) it reads the ANT+ HRM
                  broadcast directly. Requires an ANT+ strap (Polar H10 class). -->
             <iq:uses-permission id="Ant"/>
-            <iq:uses-permission id="Sensor"/>
             <iq:uses-permission id="FitContributor"/>
         </iq:permissions>
 

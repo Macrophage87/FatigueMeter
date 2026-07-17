@@ -32,9 +32,7 @@
     <string id="SetWprime">W′ (J)</string>
     <string id="SetHrMax">HR max (bpm)</string>
     <string id="SetHrRest">HR rest (bpm)</string>
-    <string id="SetSex">Sex</string>
-    <string id="SexMale">Male</string>
-    <string id="SexFemale">Female</string>
+    <string id="SetSex">Female (HR/TRIMP)</string>
 
     <string id="SetGroupFilter">Acute filter (advanced)</string>
     <string id="SetTauHr">τ_HR (s)</string>
