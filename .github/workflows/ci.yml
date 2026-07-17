@@ -298,6 +298,21 @@ jobs:
           fetch-depth: 0
       - run: bash scripts/check_store_fresh.sh
 
+  # ------------------------------------------------------ test-surface lint (adv)
+  # ADVISORY (#92). Recurrence guard so the release build can't silently re-gain
+  # test-only dead code: asserts every source/*Tests.mc module carries a
+  # module-level `(:test)` (whole test surface stripped from release) and warns on
+  # new un-annotated debug/fake/mock seams in shipping modules. Runner-free, no SDK.
+  # Advisory for now (promote into ci-required.needs once proven false-positive-free).
+  test-surface:
+    name: Test-surface strip lint (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+      - run: python3 scripts/check_test_surface.py
+
   # --------------------------------------------------------- traceability lint
   traceability:
     name: Constants <-> traceability (advisory)

@@ -33,6 +33,14 @@ using Toybox.Math;
 //! covered by testViewDefaultSnapshotIsConservative), and DescriptiveStrings
 //! (resource bundle). These tests execute under the #42 run-gate (monkeydo -t),
 //! not just at compile.
+//! (:test) on the MODULE (#92): makes the ENTIRE module one build-conditional
+//! unit -- the (:test)-annotated tests, the un-annotated near/posInf/baseStatusCtx
+//! helpers, AND the Fake* classes are included under --unit-test and stripped
+//! from a release build together. The helpers stay un-(:test) so the runner never
+//! invokes them as tests (arity error); they ride along with the module. The
+//! check_ciq_tests.py counter only tallies `(:test) function`, so this module tag
+//! is count-neutral.
+(:test)
 module CoverageTests {
 
     // Local copies of the shared helpers (module-local, no cross-module coupling).

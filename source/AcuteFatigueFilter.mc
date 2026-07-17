@@ -394,7 +394,14 @@ class AcuteFatigueFilter {
     //! NOTE: deliberately NOT annotated `(:test)`. `(:test)` marks a *unit test*,
     //! so the runner would invoke this two-argument helper with a single logger
     //! arg -> "Not Enough Arguments" ERROR (surfaced once the tests actually ran,
-    //! see #42). It is a plain (tiny, never-called-in-release) helper instead.
+    //! see #42). It also can't be `(:test)`-stripped the way the CoverageTests /
+    //! PureFunctionTests modules are (#92): it must reach the `hidden` state x /
+    //! initialized, so it has to live in this shipping class. Its ONLY caller is a
+    //! `(:test)` in PureFunctionTests, which #92 strips from release builds, so in
+    //! a release image this method is UNREFERENCED and a dead-code-elimination
+    //! candidate. It is allow-listed in scripts/check_test_surface.py (the #92
+    //! recurrence lint) as the one known shipping-module test seam, with this
+    //! rationale, so a NEW un-annotated seam can't slip in unnoticed.
     function debugInjectNonFiniteState(index, value) {
         initialized = true;
         x[index] = value;
