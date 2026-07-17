@@ -125,7 +125,11 @@ class SessionStore {
     //! 1 = persisted / 0 = too-big. The catch is deliberately catch-ALL — history
     //! integrity does NOT depend on the exception type (persist()'s working-copy
     //! design makes any non-persisting path a no-op on `history`), so no typed
-    //! discriminator is landed. Skipping the shed on a non-storable (serialization)
+    //! discriminator is landed. (Caveat: for a non-storable POISON *record* — as
+    //! opposed to a full store — the catch-all still sheds good in-memory rides
+    //! trying to route around it; that pre-existing limitation is exactly why the
+    //! discriminator is tracked, not a claim that catch-all is harmless there.)
+    //! Skipping the shed on a non-storable (serialization)
     //! value is intentionally NOT separable on the simulator (#65): the storage-fill
     //! probe only ever provokes the QUOTA exception, never a serialization one, so
     //! "shed on quota, abort on non-storable" cannot be distinguished there.

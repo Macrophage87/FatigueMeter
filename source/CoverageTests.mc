@@ -704,6 +704,24 @@ module CoverageTests {
         return okStatus && okDropped && okNull;
     }
 
+    (:test)
+    function testShedWriteFitsImmediatelyNoDrop(logger) {
+        // #65: the COMMON path -- writer fits at full size, so shedWrite commits
+        // with dropped == 0. Kills a commit-with-0-dropped mutant that persist()'s
+        // `dropped > 0` shrink gate relies on (a >0 that returned 1 at 0 would set
+        // shed spuriously). Seed [1..5]; nothing is shed.
+        var work = [] as Lang.Array;
+        for (var i = 1; i <= 5; i++) { work.add(i); }
+        var writer = new FakeShedWriter(5);   // fits immediately (size 5 <= 5)
+        var res = SessionStore.shedWrite(work, 1, writer.method(:write));
+        var committed = res[0] as Lang.Array;
+        var okStatus  = (res[2] == true);
+        var okDropped = (res[1] == 0);
+        var okSize    = (committed.size() == 5);
+        var okNewest  = (committed[committed.size() - 1] == 5);
+        return okStatus && okDropped && okSize && okNewest;
+    }
+
     // ---- TrainingLoadLedger day-index + real-dt (#22) and ewmaFold guard (#34a) ----
     // NOTE: the caller-side pause->dt=0 decision lives in FatigueMeterView.computeInner
     // (view loop) and is verified by reasoning, not a pure unit test -- it needs an
