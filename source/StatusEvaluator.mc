@@ -40,18 +40,26 @@ class StatusEvaluator {
         var alpha1Gated = !(alpha1Metric != null && alpha1Metric.availability == Signals.AVAIL_OK);
         var decoupOnly = (wRr != null && wRr < 0.5);   // null-guard the compare (#10)
 
-        // --- durability advisory (§6): needs time-on-task + decoupling drift ---
-        // above the athlete's OWN early-ride baseline (decoupling% already IS the
-        // drift-vs-baseline signal), past the kJ anchor. NOT a bare absolute >8%.
+        // --- durability advisory (§6): time-on-task + decoupling drift above the
+        // athlete's OWN early-ride baseline (decoupling% already IS the drift-vs-
+        // baseline signal), with work-done corroboration. TWO TIERS: ELEVATED drift
+        // (> caution) needs the FULL kJ anchor; SEVERE drift (> high, #25) needs only
+        // a REDUCED (half) kJ anchor. Always time-gated -- NOT a bare absolute >8%.
         var decoupDrift = 0.0;
         var decoupUsable = (decoupMetric != null && decoupMetric.isUsable());
         if (decoupUsable) { decoupDrift = decoupMetric.value; }
 
         var pastTime = (elapsed != null && elapsed >= Constants.DURABILITY_MIN_S);   // null-guard (#10)
-        var pastKj = (kjw != null && kjw >= 0.6 * cfg.kjAnchor);
-        var decoupHigh = decoupUsable && (decoupDrift > cfg.decoupCaution);
+        var pastKj        = (kjw != null && kjw >= 0.6 * cfg.kjAnchor);   // full anchor (elevated tier)
+        var pastKjReduced = (kjw != null && kjw >= 0.3 * cfg.kjAnchor);   // reduced anchor (severe tier), half the full
+        // cfg.decoupHigh is the severe tier (#25); the local formerly named
+        // "decoupHigh" only ever meant "elevated" (> caution).
+        var decoupElevated = decoupUsable && (decoupDrift > cfg.decoupCaution);
+        var decoupSevere   = decoupUsable && (decoupDrift > cfg.decoupHigh);
 
-        var advisoryActive = pastTime && pastKj && decoupHigh;
+        // Elevated drift past BOTH anchors, OR severe drift past the time anchor and
+        // the REDUCED kJ anchor (a > decoupHigh drift substitutes for half the work).
+        var advisoryActive = pastTime && ((pastKj && decoupElevated) || (pastKjReduced && decoupSevere));
 
         // Per-athlete AFI drift above the athlete's own rolling baseline (§4.5) —
         // fires the severe band in parallel to the α1 drift signal, so the
