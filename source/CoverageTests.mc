@@ -249,6 +249,42 @@ module CoverageTests {
         return okCap && okVals;
     }
 
+    // ---- RingBuffer lazy-grow fill->wrap boundary (#93) ----
+    (:test)
+    function testRingBufferGrowsThenWrapsIdentity(logger) {
+        // The lazy backbone (buf = []; grow to cap) must keep toArray() order EXACT
+        // across the growth -> full -> wrap transition. An off-by-one at fill->wrap
+        // would silently corrupt oldest->newest order, so pin all three states:
+        // partial fill, the exact full boundary (not yet wrapped), and post-wrap.
+        var rb = new RingBuffer(3);
+        rb.push(1); rb.push(2);
+        var a = rb.toArray();                 // partial (grew to 2 slots): [1,2]
+        rb.push(3);
+        var full = rb.toArray();              // exactly full, head just wrapped: [1,2,3]
+        var ev = rb.push(4);                  // wrap: overwrite oldest slot, evict 1
+        var b = rb.toArray();                 // [2,3,4]
+        var okPartial = (a.size() == 2) && (a[0] == 1) && (a[1] == 2);
+        var okFull    = (full.size() == 3) && (full[0] == 1) && (full[1] == 2)
+                        && (full[2] == 3) && rb.isFull();
+        var okWrap    = (ev == 1) && (b.size() == 3) && (b[0] == 2) && (b[1] == 3)
+                        && (b[2] == 4) && (rb.latest() == 4);
+        return okPartial && okFull && okWrap;
+    }
+
+    (:test)
+    function testRingBufferClearThenRefillReusesSlots(logger) {
+        // After a full ride the grown backbone is retained; clear()+refill must
+        // reuse slots from index 0 and keep toArray() order correct (the
+        // head < buf.size() reuse branch, distinct from the growth branch).
+        var rb = new RingBuffer(3);
+        rb.push(1); rb.push(2); rb.push(3); rb.push(4);   // fill + wrap, buf now size 3
+        rb.clear();
+        rb.push(7); rb.push(8);               // reuse existing slots, no new growth
+        var arr = rb.toArray();               // [7,8] oldest->newest
+        return (rb.size() == 2) && (arr.size() == 2) && (arr[0] == 7)
+               && (arr[1] == 8) && (rb.latest() == 8);
+    }
+
     (:test)
     function testRingBufferNegativeCapacity(logger) {
         // -3 must not throw inside `new [negative]`; clamps to a single slot.
