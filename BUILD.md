@@ -36,6 +36,32 @@ monkeyc \
 To build for a different device, change `-d` to any product id listed in
 `manifest.xml` (e.g. `edge840`, `fr965`).
 
+This non-`--unit-test` build is the one that ships and the only one that surfaces
+the **data-field memory-budget error**: `monkeyc` applies the target's data-field
+memory limit for `type=datafield` and fails the build when the static image (code
++ globals) exceeds it. The required `release-build` CI gate (below) runs exactly
+this command for all 8 manifest devices, so an over-budget or non-loading release
+image can't ship green. (Runtime peak-heap is a separate concern — measured in the
+simulator's Active-Memory profiler, a release-checklist step, not at compile.)
+
+## Package for the Connect IQ store (`.iq`)
+
+The store deliverable is a multi-device `.iq` package produced by `monkeyc -e`
+(export):
+
+```sh
+# validation build (throwaway key) — proves it packages across all devices
+monkeyc -e -f monkey.jungle -o store/FatigueMeter.iq -y developer_key.der
+
+# store-submittable build — sign with your account-bound developer key + --release
+monkeyc -e -r -f monkey.jungle -o store/FatigueMeter.iq -y <account_key>.der
+```
+
+The `release-build` CI gate builds the validation form every run (throwaway key)
+and uploads it as an artifact; the **store-submittable** signed package must be
+regenerated from current `main` at release time with the real key (CI cannot — it
+has no account-bound key and no write access). See `docs/release-checklist.md`.
+
 ## Run in the simulator
 
 ```sh
@@ -101,6 +127,25 @@ running a pre-built Docker image as the job container (see `test` below).
   hard timeout — deliberately not the image's `tester.sh`, which hangs on
   failure), asserting `ran == passed == expected`, `failed == 0`, `errors == 0`.
   A failing or non-running test blocks merges.
+- **`release-build`** (**required**, #91) — the **release-artifact + memory
+  gate**. It compiles the **non-`--unit-test`** release `.prg` (the shipping
+  build, the exact "Build" command above plus `-w`) for **all 8 manifest
+  devices**, and packages the store `.iq` (`monkeyc -e`) — neither of which the
+  `--unit-test`-only `test`/`simulate` jobs ever produce. A release compile
+  failure, a data-field memory-budget error (non-zero `monkeyc` exit), or a
+  compiler `WARNING` (grepped from output — `-w` alone is not fatal) on any device
+  blocks merges. Per-device `.prg` sizes, the `.iq`, and a `release-sizes.txt` are
+  uploaded as an artifact so budget pressure is visible over time (feeds #93). It
+  catches the #90 class of a **non-loading / static-over-budget** release image;
+  runtime peak-heap OOM is out of a compiler's reach and stays a release-checklist
+  Active-Memory step.
+- **`store-staleness`** (advisory, `continue-on-error`) —
+  `scripts/check_store_fresh.sh` emits a GitHub `::warning::` when tracked source
+  (`source/`, `resources/`, `manifest.xml`, `monkey.jungle`) was committed after
+  the packaged `store/FatigueMeter.iq`, a reminder to regenerate + sign the store
+  package at release. Advisory by design: the signed `.iq` is a release deliverable
+  regenerated with the account-bound key (CI can't rebuild it), so staleness on a
+  source PR is expected, not a merge blocker.
 - **`traceability`** (advisory, `continue-on-error`) —
   `scripts/check_traceability.py` enforces "no physiological constant in
   `source/Constants.mc` without a `docs/traceability.md` row." It is advisory
@@ -108,11 +153,13 @@ running a pre-built Docker image as the job container (see `test` below).
   (add it to `ci-required`'s `needs`) once it no longer produces false
   positives.
 - **`ci-required`** — the aggregator job that `needs: [manifest-lint, test,
-  simulate]`. **This is the single stable required status check** to require in
-  branch protection (with "require branches to be up to date before merging"), so
-  a failure in any of the three fails it. Only `traceability` stays advisory,
-  out of the required set. Enabling the branch-protection rule is a manual
-  repo-admin step.
+  simulate, release-build]`. **This is the single stable required status check**
+  to require in branch protection (with "require branches to be up to date before
+  merging"), so a failure in any of the four fails it. `traceability` and
+  `store-staleness` stay advisory, out of the required set. Enabling the
+  branch-protection rule is a manual repo-admin step. (The `ci-required` context
+  name is unchanged, so adding `release-build` needs no branch-protection
+  reconfiguration.)
 
 The workflow uses no secrets and every `uses:` action is SHA-pinned, so fork-PR
 runs are safe. The PR trigger has **no `paths-ignore`** (the workflow always
@@ -121,10 +168,12 @@ status instead of sitting pending forever under "require branches up to date".
 
 ### Compile + run gates
 
-Two **required** SDK-backed jobs cover the Monkey C surface: **`test`** compiles
-the `--unit-test` build for all 8 manifest devices, and **`simulate`** runs the
-`(:test)` suite headlessly on `edge1050`. Both run the
-`ghcr.io/matco/connectiq-tester` Docker image **as the job container**.
+Three **required** SDK-backed jobs cover the Monkey C surface: **`test`** compiles
+the `--unit-test` build for all 8 manifest devices, **`simulate`** runs the
+`(:test)` suite headlessly on `edge1050`, and **`release-build`** compiles the
+**non-`--unit-test`** release image (the shipping build, with its data-field
+memory-budget check) for all 8 devices and packages the store `.iq`. All three run
+the `ghcr.io/matco/connectiq-tester` Docker image **as the job container**.
 
 Unattended Garmin SDK download on a GitHub-hosted runner is infeasible (EULA +
 manifest-gated, unpredictable zip URLs), and a self-hosted `connectiq` runner was
@@ -144,10 +193,11 @@ fails fast on a hard timeout rather than hanging the way `tester.sh` does). The
 image is **pinned by digest** for supply-chain safety; the digest currently
 corresponds to `v2.8.0` (SDK 9.2.0).
 
-Both jobs are **required** — in `ci-required`'s `needs`, no `continue-on-error`
-(#42): a `--unit-test` compile failure on any device, or a failing / non-running
-test, blocks merges. The SDK-dependent checks can also be run locally (see
-"Build" and "Unit tests" above).
+These jobs are **required** — in `ci-required`'s `needs`, no `continue-on-error`
+(#42, #91): a `--unit-test` compile failure on any device, a failing / non-running
+test, or a release-build compile / memory-budget / warning failure blocks merges.
+The SDK-dependent checks can also be run locally (see "Build", "Package for the
+Connect IQ store", and "Unit tests" above).
 
 ## Sideload to an Edge 1050
 

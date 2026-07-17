@@ -62,6 +62,28 @@ back to the matching item here.
     pure decode/reopen/staleness predicates (`rrDelta`, `shouldReopen`,
     `stallExpired`, `hrByteValid`) are unit-tested (#47/#11/#24).
 
+- [ ] **Release image — data-field runtime peak-heap** (`source/FatigueMeterView.mc`, #91/#93)
+  - The required `release-build` CI job compiles the non-`--unit-test` release
+    `.prg` for all 8 devices and fails on the compiler's **static** data-field
+    memory-budget error — but the compiler cannot see **runtime peak heap**
+    (allocations during `compute()`/`onUpdate`: `toArray()` copies, the Kalman
+    temp-matrix cascade, `DfaAlpha1.compute`'s `y = new [N]`, plus the ~25–40 KB
+    of fixed construction ring buffers per #93). Open the simulator's **Active
+    Memory** profiler on **edge1050** (and, per #93, on the tighter budgets —
+    `edge540` / `edge840` / `edgeexplore2` / `fr955`), drive a ride, and confirm
+    peak stays within each device's data-field cap. This is the one lever that
+    can confirm/refute #90 root-cause #3 (load-time / runtime OOM).
+
+- [ ] **Store package — regenerate + sign `store/FatigueMeter.iq`** (#91)
+  - CI's `release-build` builds the `.iq` with a **throwaway** key (packaging
+    validation only, uploaded as an artifact) and the advisory `store-staleness`
+    check warns when source outpaces the committed package. Neither can produce
+    the store-submittable binary. At release, regenerate it from current `main`
+    with the **account-bound developer key**:
+    `monkeyc -e -r -f monkey.jungle -o store/FatigueMeter.iq -y <account_key>.der`,
+    then commit it so the store package reflects shipped `main` (clears the
+    `store-staleness` warning).
+
 ## Why these stay off the CI gate
 `AntHrm extends Ant.GenericChannel`, `FatigueMeterView extends WatchUi.DataField`,
 and `FatigueMeterApp extends Application.AppBase` are all **unconstructable in the
@@ -71,3 +93,9 @@ non-deterministic in the sim. Forcing any of these into the required `simulate`
 gate would red it for every PR. (By contrast, `FitLogger` — a plain class with
 constructor injection — and `DescriptiveStrings`' pure dispatch **are**
 unit-tested; see #81 PR-1 / PR-2.)
+
+The two release-image items above are a different case: the required `release-build`
+job (#91) DOES compile the shipping artifact and hard-fails on the compiler's
+**static** data-field budget error, but **runtime peak-heap** and **real-key store
+signing** are structurally beyond a compiler / a secret-free CI run — hence they
+live here as per-release manual steps rather than gates.
