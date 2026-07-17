@@ -73,6 +73,23 @@ class Config {
         return MathUtil.clamp(raw, Constants.ARTIFACT_GOOD + 0.5, VALID_MAX);
     }
 
+    //! Clamp `value` up so it is never below `floor` — enforces band ordering (#29)
+    //! so inverted user settings can't make a status band unreachable / a severity
+    //! tier fire below the tier beneath it. Pure/(:test)-drivable.
+    static function atLeast(value, floor) {
+        return (value < floor) ? floor : value;
+    }
+
+    //! Order a 3-tier band ladder non-decreasing (#29): caution >= ok, then high >=
+    //! the CLAMPED caution (not the raw one). Returns [ok, caution, high]. Pure so
+    //! the chained clamp is (:test)-drivable — catches a clamp-against-raw / wrong-
+    //! order mutant the atLeast unit test alone can't.
+    static function orderBands(ok, caution, high) {
+        caution = atLeast(caution, ok);
+        high    = atLeast(high, caution);
+        return [ok, caution, high];
+    }
+
     //! Validate the HR pair. Returns [rest, max]. If either input is non-finite,
     //! rest is sub-physiological, or the span is too small (including a swapped
     //! rest>=max pair), reset BOTH to the documented defaults. A swapped/degenerate
@@ -157,6 +174,10 @@ class Config {
         decoupOk      = num("decoupOk", Constants.DECOUP_OK).toFloat();
         decoupCaution = num("decoupCaution", Constants.DECOUP_CAUTION).toFloat();
         decoupHigh    = num("decoupHigh", Constants.DECOUP_HIGH).toFloat();
+        // #29: enforce non-decreasing band order so an inverted user setting can't
+        // make the severe tier fire below the elevated one (Part A reads decoupHigh).
+        var db = orderBands(decoupOk, decoupCaution, decoupHigh);
+        decoupOk = db[0]; decoupCaution = db[1]; decoupHigh = db[2];
         artifactGate  = clampGate(num("artifactGate", 5.0).toFloat());
         powerCvGate   = num("powerCvGate", 0.10).toFloat();
         coastFracGate = num("coastFracGate", 0.10).toFloat();
@@ -164,6 +185,7 @@ class Config {
 
         afiFresh      = num("afiFresh", Constants.AFI_FRESH_MAX).toFloat();
         afiBuilding   = num("afiBuilding", Constants.AFI_BUILDING_MAX).toFloat();
+        afiBuilding   = atLeast(afiBuilding, afiFresh);   // #29: BUILDING band can't invert below FRESH
         afiDriftMargin = num("afiDriftMargin", 15.0).toFloat();
         decoupRef     = clampPositive(num("decoupRef", Constants.DECOUP_REF).toFloat(), 0.1);
 

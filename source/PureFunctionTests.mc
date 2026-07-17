@@ -901,4 +901,28 @@ module PureFunctionTests {
         for (var d = 0; d < 285; d++) { t += 1; prims.update(null, 140, 90, null, t); }
         return prims.isStationary() == false;
     }
+
+    // ---- Config band-ordering clamps (#29) ----
+    (:test)
+    function testOrderBandsChainsClamp(logger) {
+        // ok=12 lifts caution 8 -> 12; high 10 lifts against the CLAMPED caution (12)
+        // -> 12, NOT against raw 8. A clamp-against-raw / wrong-order mutant -> high=10.
+        var b = Config.orderBands(12.0, 8.0, 10.0);
+        return near(b[0], 12.0, 0.0) && near(b[1], 12.0, 0.0) && near(b[2], 12.0, 0.0);
+    }
+    (:test)
+    function testOrderBandsPreservesOrdered(logger) {
+        // already-ordered defaults untouched (clamp is a no-op).
+        var b = Config.orderBands(5.0, 8.0, 10.0);
+        return near(b[0], 5.0, 0.0) && near(b[1], 8.0, 0.0) && near(b[2], 10.0, 0.0);
+    }
+    (:test)
+    function testBandOrderClampsInversion(logger) {
+        // afiFresh=60 > afiBuilding=40 -> building lifted to 60 (BUILDING branch not shadowed).
+        return near(Config.atLeast(40.0, 60.0), 60.0, 0.0);
+    }
+    (:test)
+    function testBandOrderPreservesValid(logger) {
+        return near(Config.atLeast(60.0, 30.0), 60.0, 0.0);   // already ordered: no-op
+    }
 }

@@ -687,4 +687,59 @@ module CoverageTests {
         var okUnder = (AntHrm.capOldest(under, 4).size() == 1);   // under cap -> unchanged
         return okFull && okUnder;
     }
+
+    // ---- decoupHigh severe tier wired into the durability advisory (#25) ----
+    (:test)
+    function testDecoupSevereFiresWithReducedKj(logger) {
+        // Severe (> high 10) + REDUCED kJ (>= 0.3 anchor, < full 0.6) + time -> DRIFTING.
+        // main (full anchor only) left this BUILDING.
+        var ctx = baseStatusCtx();
+        ctx[:decoupMetric] = Signals.Metric.ok(12.0, 1.0);
+        ctx[:kjWeighted] = 700.0;                          // >= 0.3*2000 (600), < 0.6 (1200)
+        ctx[:elapsedS] = 4000;
+        var r = StatusEvaluator.evaluate(new Config(), ctx);
+        return r[:advisoryActive] == true && r[:status] == DescriptiveStrings.STATUS_DRIFTING;
+    }
+    (:test)
+    function testDecoupSevereStillNeedsSomeWork(logger) {
+        // Severe is NOT time-alone: below even the reduced 0.3 anchor -> no advisory.
+        var ctx = baseStatusCtx();
+        ctx[:decoupMetric] = Signals.Metric.ok(12.0, 1.0);
+        ctx[:kjWeighted] = 300.0;                          // < 0.3*2000 (600)
+        ctx[:elapsedS] = 4000;
+        return StatusEvaluator.evaluate(new Config(), ctx)[:advisoryActive] == false;
+    }
+    (:test)
+    function testDecoupElevatedStillNeedsFullKj(logger) {
+        // Elevated (caution < 9 < high) needs the FULL anchor -- reduced-only work is
+        // the severe tier's privilege only.
+        var ctx = baseStatusCtx();
+        ctx[:decoupMetric] = Signals.Metric.ok(9.0, 1.0);
+        ctx[:kjWeighted] = 700.0;                          // reduced ok, full fails, 9 not severe
+        ctx[:elapsedS] = 4000;
+        return StatusEvaluator.evaluate(new Config(), ctx)[:advisoryActive] == false;
+    }
+    (:test)
+    function testDecoupSevereStillNeedsTime(logger) {
+        // Severe drift + kJ met but only 20 min -> time gate blocks it (not a bare absolute).
+        var ctx = baseStatusCtx();
+        ctx[:decoupMetric] = Signals.Metric.ok(15.0, 1.0);
+        ctx[:kjWeighted] = 5000.0;
+        ctx[:elapsedS] = 1200;                             // < DURABILITY_MIN_S
+        return StatusEvaluator.evaluate(new Config(), ctx)[:advisoryActive] == false;
+    }
+    (:test)
+    function testDecoupHighSettingMovesBoundary(logger) {
+        // #25 honesty: the severe firing boundary tracks cfg.decoupHigh. Same drift
+        // (15) + reduced-kJ-only work fires with default high=10 but NOT once high=20.
+        // A mutant hard-coding a literal 10 fires in both -> fails here.
+        var ctx = baseStatusCtx();
+        ctx[:decoupMetric] = Signals.Metric.ok(15.0, 1.0);
+        ctx[:kjWeighted] = 700.0;                          // reduced-only path
+        ctx[:elapsedS] = 4000;
+        var firesDefault = StatusEvaluator.evaluate(new Config(), ctx)[:advisoryActive];
+        var raised = new Config();  raised.decoupHigh = 20.0;
+        var firesRaised = StatusEvaluator.evaluate(raised, ctx)[:advisoryActive];
+        return firesDefault == true && firesRaised == false;
+    }
 }
