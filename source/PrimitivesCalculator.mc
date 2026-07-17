@@ -263,8 +263,15 @@ class PrimitivesCalculator {
     //! fraction are below the configured limits (white paper §3.1). Otherwise
     //! low-confidence. Needs the baseline established (>15 min) and HR present.
     function decouplingMetric() {
-        var pArr = winPower.toArray();
-        var hrArr = winHr.toArray();
+        return decouplingMetricFrom(winPower.toArray(), winHr.toArray());
+    }
+
+    //! Parameterized form (#93): decoupling computed from explicit window
+    //! snapshots, so a caller holding one snapshot can feed both this and
+    //! alpha1MetricFrom without a second toArray() (single source of truth -- no
+    //! mutable cache field, no post-update() staleness footgun). The no-arg form
+    //! above delegates here with its own fresh reads.
+    function decouplingMetricFrom(pArr, hrArr) {
         var hrMean = nonZeroMean(hrArr);
         if (hrMean <= 0) { return Signals.Metric.unavailable("no HR"); }
         if (efBaseline == null) {
@@ -296,6 +303,14 @@ class PrimitivesCalculator {
     //! DFA-α1 with hard artifact gate AND stationarity gate (white paper §3.3).
     //! Returns value + a quality that folds artifact %, fit r2, and stationarity.
     function alpha1Metric() {
+        return alpha1MetricFrom(winPower.toArray());
+    }
+
+    //! Parameterized form (#93): the stationarity gate reads the caller-supplied
+    //! power snapshot instead of a fresh toArray(); alpha/r2/artifact still come
+    //! from cachedAlpha1. Lets computeInner's alpha1AndDecoupling() share ONE
+    //! winPower snapshot between this gate and decouplingMetricFrom.
+    function alpha1MetricFrom(pArr) {
         var alpha = cachedAlpha1[0];
         var r2 = cachedAlpha1[1];
         var art = cachedAlpha1[2];
@@ -308,7 +323,6 @@ class PrimitivesCalculator {
                 "artifact " + art.format("%.0f") + "%");
         }
         // stationarity gate: within-window power CV / coasting
-        var pArr = winPower.toArray();
         // Too few VALID samples can't establish stationarity (#19): with dropouts
         // now excluded, a mostly-dropout window must not read confidently steady.
         if (validCount(pArr) < Constants.MIN_VALID_POWER) {
@@ -323,6 +337,21 @@ class PrimitivesCalculator {
         }
         var q = MathUtil.clamp(r2, 0.0, 1.0);
         return Signals.Metric.ok(alpha, q);
+    }
+
+    //! Compute the α1 and decoupling metrics from a SINGLE post-push window
+    //! snapshot (#93). computeInner calls this once per tick instead of
+    //! alpha1Metric()+decouplingMetric() separately, so winPower is snapshotted
+    //! once (not twice) and winHr once -- a small 1 Hz allocation/GC saving. No
+    //! persistent snapshot state, so no staleness footgun: the arrays live only
+    //! for this call. Returns [alpha1Metric, decouplingMetric]; both are
+    //! byte-identical to the no-arg forms (same snapshot content). isStationary()
+    //! is intentionally NOT folded in -- it runs pre-push, on a different window
+    //! state, and keeps its own live read.
+    function alpha1AndDecoupling() {
+        var pArr = winPower.toArray();
+        var hrArr = winHr.toArray();
+        return [ alpha1MetricFrom(pArr), decouplingMetricFrom(pArr, hrArr) ];
     }
 
     //! Raw artifact percentage of the current RR window (data-quality footer).

@@ -70,9 +70,44 @@ back to the matching item here.
     temp-matrix cascade, `DfaAlpha1.compute`'s `y = new [N]`, plus the ~25–40 KB
     of fixed construction ring buffers per #93). Open the simulator's **Active
     Memory** profiler on **edge1050** (and, per #93, on the tighter budgets —
-    `edge540` / `edge840` / `edgeexplore2` / `fr955`), drive a ride, and confirm
-    peak stays within each device's data-field cap. This is the one lever that
-    can confirm/refute #90 root-cause #3 (load-time / runtime OOM).
+    `edge540` / `edge840` / `edgeexplore2` / `fr955` / `fenix7x`), drive a ride, and
+    confirm peak stays within each device's data-field cap. This is the one lever
+    that can confirm/refute #90 root-cause #3 (load-time / runtime OOM).
+  - **#93 AC-1 procedure (this is #93's sole closure gate — owner-run, CI can't
+    automate it).** Reproducibly:
+    1. **Per-device cap:** read each device's data-field memory limit from the SDK
+       device definition (the *same* budget `monkeyc` applies in the `release-build`
+       gate) — the caps are SDK-owned, not in-repo. Record it per device.
+    2. **Fixture:** drive a **≥ 20-minute** ride (so `be20`'s 20-min best-effort
+       window fully fills and its ~10 KB `toArray()` worst-case transient is reached)
+       with power + HR present, and **inject HRV (RR) intervals via Simulation →
+       Sensors** (BUILD.md "Run in the simulator") so the `rrBuf` / `DfaAlpha1.compute`
+       (`y = new [N]`) path is exercised — RR arrives over ANT+, not FIT playback.
+    3. **Read Active Memory** at four phases per device and tabulate vs the cap:
+       **construction**, **first-compute**, **fill-phase** (the #95 lazy-grow ramp),
+       **steady-state** (post-20-min).
+    4. **Outcome:** if no device is within ~10 % of its cap → **close #93** as
+       "profiled, not over budget" with the table attached. If a device shows
+       pressure → apply an AC-2 fix (e.g. the #93 `toArray()` snapshot dedup already
+       landed; then weigh remediation #4, window resize, only with a fatigue-output
+       regression on this fixture — it is model-altering).
+
+    One row **per device** (Step 1 records the cap per device, so don't group them):
+
+    | device | cap (KB) | construction | first-compute | fill-phase | steady | headroom |
+    |--------|----------|--------------|---------------|------------|--------|----------|
+    | edge1050 (primary) |  |  |  |  |  |  |
+    | edge1040 |  |  |  |  |  |  |
+    | edge840 |  |  |  |  |  |  |
+    | edge540 |  |  |  |  |  |  |
+    | edgeexplore2 |  |  |  |  |  |  |
+    | fr965 |  |  |  |  |  |  |
+    | fr955 |  |  |  |  |  |  |
+    | fenix7x |  |  |  |  |  |  |
+
+    (All 8 manifest devices — the tight-budget concern centres on
+    `edge540`/`edge840`/`edgeexplore2`/`fr955`/`fenix7x`, but profile edge1050 and
+    edge1040 too so the primary target's headroom is on record.)
 
 - [ ] **Store package — regenerate + sign `store/FatigueMeter.iq`** (#91)
   - CI's `release-build` builds the `.iq` with a **throwaway** key (packaging

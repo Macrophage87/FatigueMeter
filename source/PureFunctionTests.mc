@@ -987,6 +987,82 @@ module PureFunctionTests {
         return prims.isStationary() == false;
     }
 
+    // ---- decouplingMetric + EF-baseline (first-ever coverage, #93) ----
+    // These drive update() through the 300-900 s EF-baseline window, then read
+    // decouplingMetric(), covering the previously-untested EF-baseline finalize
+    // path and pinning golden values (not just directional bounds). One also
+    // guards the #93 dedup's parameterized form (decouplingMetricFrom must read
+    // the SUPPLIED snapshot, not internal buffers).
+    (:test)
+    function testDecouplingWarmingUpBeforeBaseline(logger) {
+        // Before efBaseline finalizes (elapsed <= 900) decoupling is lowConf
+        // ("warming up") -- usable, so distinguish it from ok by availability.
+        var prims = new PrimitivesCalculator(new Config());
+        var t = 300;
+        for (var s = 0; s < 60; s++) { prims.update(200, 140, 90, null, t); t += 1; }
+        var d = prims.decouplingMetric();
+        return d.availability == Signals.AVAIL_LOW_CONF;
+    }
+
+    (:test)
+    function testDecouplingZeroForSteadyRide(logger) {
+        // Golden: a perfectly steady ride reads EXACTLY ~0% once the baseline lands
+        // (efWindow == efBaseline). AVAIL_OK proves the baseline finalized.
+        var prims = new PrimitivesCalculator(new Config());
+        var t = 300;
+        for (var s = 0; s < 60; s++) { prims.update(200, 140, 90, null, t); t += 1; }
+        prims.update(200, 140, 90, null, 901);   // finalize efBaseline
+        var d = prims.decouplingMetric();
+        return d.availability == Signals.AVAIL_OK && near(d.value, 0.0, 0.01);
+    }
+
+    (:test)
+    function testDecouplingGoldenValueOnHrDrift(logger) {
+        // Golden pin: baseline EF at 200 W / 140 bpm, then 60 s of drift to 160.
+        // Window hrMean = (61*140 + 60*160)/121 = 149.917 -> efWin = 200/that =
+        // 1.33407; efBaseline = 200/140 = 1.42857 -> decoupling = 6.615%. A 2x
+        // scaling error (~13.2) fails this; a sign flip fails it; directional-only
+        // bounds would not have.
+        var prims = new PrimitivesCalculator(new Config());
+        var t = 300;
+        for (var s = 0; s < 60; s++) { prims.update(200, 140, 90, null, t); t += 1; }
+        prims.update(200, 140, 90, null, 901);   // finalize efBaseline ~ 200/140
+        var u = 902;
+        for (var s = 0; s < 60; s++) { prims.update(200, 160, 90, null, u); u += 1; }
+        var d = prims.decouplingMetric();
+        return d.availability == Signals.AVAIL_OK && near(d.value, 6.615, 0.25);
+    }
+
+    (:test)
+    function testDecouplingUnavailableWithoutHr(logger) {
+        // No-HR gate (first coverage): HR absent -> window hrMean 0 -> unavailable,
+        // regardless of power/baseline. The check precedes the efBaseline gate.
+        var prims = new PrimitivesCalculator(new Config());
+        var t = 300;
+        for (var s = 0; s < 40; s++) { prims.update(200, null, 90, null, t); t += 1; }
+        var d = prims.decouplingMetric();
+        return d.availability == Signals.AVAIL_UNAVAILABLE;
+    }
+
+    (:test)
+    function testDecouplingFromUsesPassedSnapshot(logger) {
+        // #93 param-threading guard: decouplingMetricFrom must use the SUPPLIED
+        // snapshot, not internal buffers. The live window is steady 200/140 (~0%),
+        // but a hand-built drifted snapshot (160 bpm) must yield exactly 12.5%
+        // ((1.42857 - 1.25)/1.42857*100). A mutant ignoring the params and reading
+        // winPower/winHr would return ~0 and fail.
+        var prims = new PrimitivesCalculator(new Config());
+        var t = 300;
+        for (var s = 0; s < 60; s++) { prims.update(200, 140, 90, null, t); t += 1; }
+        prims.update(200, 140, 90, null, 901);   // finalize efBaseline ~ 200/140
+        var live = prims.decouplingMetric();      // live window steady -> ~0%
+        var cp = []; var ch = [];
+        for (var s = 0; s < 60; s++) { cp.add(200); ch.add(160); }
+        var fromDrift = prims.decouplingMetricFrom(cp, ch);   // 200/160 -> 12.5%
+        return live.availability == Signals.AVAIL_OK && near(live.value, 0.0, 0.5)
+            && fromDrift.availability == Signals.AVAIL_OK && near(fromDrift.value, 12.5, 0.3);
+    }
+
     // ---- Config band-ordering clamps (#29) ----
     (:test)
     function testOrderBandsChainsClamp(logger) {

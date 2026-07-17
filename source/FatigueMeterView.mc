@@ -291,7 +291,12 @@ class FatigueMeterView extends WatchUi.DataField {
         }
 
         // ---- α1 expected-for-power (population or calibrated sigmoid) ----
-        var a1Metric = prims.alpha1Metric();
+        // One combined call shares a single winPower/winHr snapshot between the α1
+        // stationarity gate and decoupling (#93), instead of two toArray() apiece.
+        // decoupling reads only winPower/winHr/efBaseline (nothing filter.step
+        // mutates), so computing it here and consuming ad[1] below is identical.
+        var ad = prims.alpha1AndDecoupling();
+        var a1Metric = ad[0];
         var pForA1 = (power != null) ? power.toFloat() : cfg.pAeT;
         var a1Expected = AcuteFatigueFilter.a1Target(pForA1, cfg.pAeT, cfg.a0, cfg.a1, cfg.sigmoidS);
         var a1Measured = a1Metric.isUsable() ? a1Metric.value : a1Expected;
@@ -303,7 +308,7 @@ class FatigueMeterView extends WatchUi.DataField {
                     active, stationary);
 
         // ---- decoupling + AFI blend ----
-        dDecoup = prims.decouplingMetric();
+        dDecoup = ad[1];   // #93: from the shared snapshot computed above
         var decoupVal = dDecoup.isUsable() ? dDecoup.value : 0.0;
         var afi = filter.afiBlended(decoupVal, prims.alpha1Artifact());
         dAfi = afi;
