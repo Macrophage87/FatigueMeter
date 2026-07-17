@@ -46,6 +46,13 @@ verdict are posted to the actual PR/issue on GitHub.** Collecting the votes is n
 the deliverable; the posted comment is. Do not consider the task done until that
 comment exists.
 
+**When reporting a review back to the maintainer in chat, state plainly whether a
+re-review is warranted** — in the chat reply itself, not only in the posted GitHub
+comment. Make this explicit for **every** verdict (Reject / Major / Minor / Accept),
+in words like "re-review warranted" or "no re-review needed", so the maintainer
+never has to infer it. When it is conditional (e.g. warranted only if the diff grows
+in a specific way), say so and name the condition.
+
 **Reviewing never includes merging, closing, or pushing.** The review protocol
 terminates at posting the verdict. Merging a PR, closing an issue, and pushing
 commits are separate gate actions — taken only when the maintainer explicitly
