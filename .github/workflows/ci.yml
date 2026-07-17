@@ -181,6 +181,123 @@ jobs:
           name: sim-run-log
           path: sim-run.log
 
+  # --------------------------------------------- release build + memory budget
+  # REQUIRED (#91). Compiles the NON-`--unit-test` RELEASE artifact -- the build
+  # that actually ships -- for every manifest device, plus the `.iq` store
+  # package, so a data field that fails to COMPILE/LOAD or exceeds a device's
+  # data-field STATIC image budget can no longer pass green (the #90 class). This
+  # is the one build the other SDK jobs never produce: `test` and `simulate` both
+  # pass `--unit-test`.
+  #
+  # WHAT THIS CATCHES (honest scope, per #91 panel):
+  #   * a release-only compile / load failure (illegal-API-in-datafield on the
+  #     REAL build, not the test build);
+  #   * the compiler's data-field memory-budget ERROR -- `monkeyc` applies the
+  #     target's data-field limit for `type=datafield` on any `-d <device>` build
+  #     and exits NON-ZERO when the STATIC image (code + globals) exceeds it. That
+  #     non-zero exit IS the assertion here (we do not merely log a size).
+  # WHAT THIS DOES NOT CATCH: runtime PEAK-HEAP OOM (allocations during
+  #   compute()/onUpdate) -- only the simulator's Active-Memory profiler / a real
+  #   device measures that. That stays a docs/release-checklist.md item (the
+  #   remaining #90 lever; see also #93's per-device construction-heap concern).
+  #
+  # NOTE on `-w` / warnings: `monkeyc -w` only RAISES warning verbosity -- it does
+  # NOT make warnings fatal. This codebase is INTENTIONALLY UNTYPED, so monkeyc
+  # emits benign "Cannot determine ... container type" notes across nearly every
+  # file (the same reason CI avoids `-l 3`). So this gate does NOT fail on
+  # warnings -- doing so would red every run on that inherent noise. It fails on a
+  # NON-ZERO monkeyc exit: a compile error OR the data-field memory-budget error.
+  # An illegal-datafield-API regression surfaces as a compile/permission ERROR
+  # (non-zero exit), so it is still gated; warnings are logged for diagnostics
+  # only. Same digest-pinned SDK image and throwaway-key pattern as `test`.
+  release-build:
+    name: Release build + data-field memory budget, all devices
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      # Same digest-pinned image as the compile/run gates (SDK 9.2.0). The digest
+      # IS the pin; the tag comment is informational.
+      image: ghcr.io/matco/connectiq-tester@sha256:7a6f586cb0e0393ff288da09cf27b6dad40a0058a346c529b99fd0fc19858f0f   # v2.8.0 = SDK 9.2.0
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+      - name: Compile the RELEASE (.prg) for every device + package the .iq
+        run: |
+          set -eu
+          # Throwaway signing key (workspace-only, never committed) -- monkeyc
+          # needs a key even for a validation build. A store-SUBMITTABLE .iq needs
+          # the account-bound developer key (a release-checklist step), which CI
+          # deliberately lacks; this build validates COMPILE + BUDGET + PACKAGING,
+          # not store signing.
+          if ! command -v openssl >/dev/null 2>&1; then apt-get update && apt-get install -y openssl; fi
+          openssl genrsa -out developer_key.pem 4096
+          openssl pkcs8 -topk8 -inform PEM -outform DER \
+              -in developer_key.pem -out developer_key.der -nocrypt
+          mkdir -p bin
+          : > release-sizes.txt
+          rc=0
+          # edge1050 FIRST -- the primary target's failure leads the log.
+          for dev in edge1050 edge1040 edge840 edge540 edgeexplore2 fr965 fr955 fenix7x; do
+            echo "== release build for $dev =="
+            log="build-$dev.log"
+            # EXACT BUILD.md "Build" (release) command -- NO --unit-test -- plus -w.
+            # Capture BOTH streams: the budget error and any WARNING go to stderr.
+            if monkeyc -f monkey.jungle -o "bin/FatigueMeter-$dev.prg" \
+                 -y developer_key.der -d "$dev" -w > "$log" 2>&1; then
+              sz=$(wc -c < "bin/FatigueMeter-$dev.prg")
+              # Warnings are NOT fatal (intentionally untyped codebase — see the
+              # NOTE above); log the count for diagnostics only.
+              wn=$(grep -c 'WARNING' "$log" || true)
+              echo "OK: $dev  (${sz} bytes, ${wn} untyped warnings)"
+              printf '%-14s %10d bytes  %4d warnings\n' "$dev" "$sz" "$wn" >> release-sizes.txt
+            else
+              # Non-zero exit = compile error OR data-field memory-budget error.
+              echo "::error::release compile / data-field memory budget FAILED for $dev:"; cat "$log"
+              rc=1
+            fi
+          done
+          echo "== packaging store .iq (all devices) =="
+          # `-e` exports the multi-device .iq -- the literal store-package format.
+          # Building it from source every run proves the shipping package still
+          # assembles and yields a CURRENT artifact, decoupled from the (possibly
+          # stale) committed store/FatigueMeter.iq.
+          if monkeyc -e -f monkey.jungle -o bin/FatigueMeter.iq \
+               -y developer_key.der -w > build-iq.log 2>&1; then
+            echo "OK: FatigueMeter.iq  ($(wc -c < bin/FatigueMeter.iq) bytes, $(grep -c 'WARNING' build-iq.log || true) untyped warnings)"
+          else
+            echo "::error::.iq package build FAILED:"; cat build-iq.log
+            rc=1
+          fi
+          echo "---- release image sizes ----"; cat release-sizes.txt || true
+          exit "$rc"
+      - name: Upload release artifacts (per-device .prg + .iq + sizes)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4.6.2
+        with:
+          name: release-build
+          path: |
+            bin/FatigueMeter-*.prg
+            bin/FatigueMeter.iq
+            release-sizes.txt
+
+  # ------------------------------------------------------- store freshness (adv)
+  # ADVISORY (#91). A store-submittable `store/FatigueMeter.iq` must be signed with
+  # the account-bound developer key, so CI (throwaway key, no `contents: write`)
+  # can never regenerate the committed binary -- a byte-sync gate is infeasible.
+  # This is therefore a FRESHNESS reminder, not a blocker: it emits a GitHub
+  # ::warning:: (no red X) when source is newer than the committed store package,
+  # so maintainers remember to regenerate + sign it at release (release-checklist).
+  # Runner-free (no SDK). Needs full history for `git log`, hence fetch-depth: 0.
+  store-staleness:
+    name: Store package freshness (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+        with:
+          fetch-depth: 0
+      - run: bash scripts/check_store_fresh.sh
+
   # --------------------------------------------------------- traceability lint
   traceability:
     name: Constants <-> traceability (advisory)
@@ -212,6 +329,6 @@ jobs:
     name: ci-required
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [ manifest-lint, test, simulate ]
+    needs: [ manifest-lint, test, simulate, release-build ]
     steps:
-      - run: echo "manifest lint + compile + unit-test run all passed"
+      - run: echo "manifest lint + unit-test compile + unit-test run + release build all passed"
