@@ -843,4 +843,62 @@ module PureFunctionTests {
             && AntHrm.shouldReopen(resp, null, false) == false
             && AntHrm.shouldReopen(resp, [0], false) == false;
     }
+
+    // ---- Power-dropout sentinel excluded from NP / coasting / sufficiency (#19) ----
+    (:test)
+    function testNormalizedPowerExcludesDropout(logger) {
+        // A dropout sentinel (-1) is EXCLUDED, not treated as 0 W: constant 200 W
+        // with one gap still yields 200 (zero-filling one of five would give ~189).
+        var npClean = PrimitivesCalculator.normalizedPower([200.0, 200.0, 200.0, 200.0]);
+        var npGap   = PrimitivesCalculator.normalizedPower([200.0, 200.0, -1.0, 200.0, 200.0]);
+        return near(npClean, 200.0, 0.001) && near(npGap, 200.0, 0.001);
+    }
+
+    (:test)
+    function testNormalizedPowerAllDropoutIsZero(logger) {
+        // All-dropout window -> n==0 -> 0.0 (no divide-by-zero; §8.4).
+        return near(PrimitivesCalculator.normalizedPower([-1.0, -1.0, -1.0]), 0.0, 1e-9);
+    }
+
+    (:test)
+    function testCoastingFractionExcludesDropout(logger) {
+        // coastThresh 12.5 (ftp 250). [200,200,-1,0,200]: -1 excluded from both num
+        // and denom; the real 0 W coast still counts -> 1 / 4 = 0.25 (counting -1 as
+        // a coast would give 0.4). All-dropout -> n==0 -> 0.0.
+        var f = PrimitivesCalculator.coastingFractionOf([200.0, 200.0, -1.0, 0.0, 200.0], 12.5);
+        var allGap = PrimitivesCalculator.coastingFractionOf([-1.0, -1.0], 12.5);
+        return near(f, 0.25, 1e-6) && near(allGap, 0.0, 1e-9);
+    }
+
+    (:test)
+    function testValidCountExcludesNegatives(logger) {
+        // The sufficiency floor's pure seam: only >= 0 samples count.
+        var n = PrimitivesCalculator.validCount([200.0, -1.0, 0.0, -1.0, 150.0]);
+        return n == 3;   // 200, 0, 150 valid; the two -1 dropouts excluded
+    }
+
+    (:test)
+    function testDropoutDoesNotFlipSteadiness(logger) {
+        // End-to-end: 40 dropout seconds of 300 would be 0.133 coasting (> the 0.10
+        // gate) if counted as 0 W -> non-stationary; excluded, and with 260 valid
+        // samples above the floor, the steady effort stays stationary.
+        var prims = new PrimitivesCalculator(new Config());
+        var t = 0;
+        for (var s = 0; s < 260; s++) { t += 1; prims.update(200, 140, 90, null, t); }
+        for (var d = 0; d < 40;  d++) { t += 1; prims.update(null, 140, 90, null, t); }
+        return prims.isStationary();
+    }
+
+    (:test)
+    function testSparseWindowNotStationary(logger) {
+        // #19 floor: a >90%-dropout window (15 valid + 285 dropout) has 300 total
+        // samples but only 15 VALID -> must NOT read stationary off a handful, even
+        // though the present samples are perfectly steady. Without the floor this
+        // would return true (the regression the sentinel exclusion introduced).
+        var prims = new PrimitivesCalculator(new Config());
+        var t = 0;
+        for (var s = 0; s < 15;  s++) { t += 1; prims.update(200, 140, 90, null, t); }
+        for (var d = 0; d < 285; d++) { t += 1; prims.update(null, 140, 90, null, t); }
+        return prims.isStationary() == false;
+    }
 }
