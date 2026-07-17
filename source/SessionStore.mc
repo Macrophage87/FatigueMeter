@@ -36,16 +36,21 @@ class SessionStore {
     hidden const KEY = "fm_sessions_v1";
     hidden const KEY_BAK = "fm_sessions_v1_bak";   // retired; deleted once on load
     hidden const KEY_ACTIVE = "fm_active_v1";      // in-progress ride snapshot (#17)
+    hidden const KEY_LAST_OUTCOME = "fm_last_outcome_v1";  // read-once trim marker (#83)
     hidden const MAX_HISTORY = 20;
     hidden const MIN_HISTORY = 1;   // shed-until-fits floor: never drop below the just-finished ride (#62)
 
     hidden var history;      // Array of Session Result dictionaries (newest last)
     hidden var writeFailed;  // true if the most recent append() could not persist
     hidden var shed;         // true if the most recent SUCCESSFUL append() dropped older records to fit (#62)
+    hidden var recoveredThisLoad;  // #83: a ride was recovered from checkpoint on THIS load() (event, not the persistent per-row `recovered` stamp)
+    hidden var trimmedOnLoad;      // #83: the last onStop-ride append shed older history (read-once from KEY_LAST_OUTCOME)
 
     function initialize() {
         writeFailed = false;
         shed = false;
+        recoveredThisLoad = false;
+        trimmedOnLoad = false;
         load();
     }
 
@@ -56,6 +61,13 @@ class SessionStore {
         // one), so the old primary+backup dance bought nothing. Delete any legacy
         // backup once so it can't linger as dead storage.
         try { Storage.deleteValue(KEY_BAK); } catch (e) { }
+        // Read-once the trim marker the last onStop-ride left (#83), then clear it
+        // so it never re-shows on a later load. Null-safe: read() returns null on
+        // the common absent-key path, so the literal drives .equals() ("trimmed" is
+        // never null) — the reverse (read(...) as Lang.String).equals(...) would
+        // null-deref, since `as` is a compile-time hint, not a runtime coerce.
+        trimmedOnLoad = "trimmed".equals(read(KEY_LAST_OUTCOME));
+        try { Storage.deleteValue(KEY_LAST_OUTCOME); } catch (e) { }
         reconcileActive();   // recover a ride whose onStop never fired (#17)
     }
 
@@ -71,6 +83,14 @@ class SessionStore {
         history.add(result);
         while (history.size() > MAX_HISTORY) { history.remove(history[0]); }
         writeFailed = !persist();
+        // #83: a durable-but-shed append leaves a read-once marker for the NEXT
+        // start's footer. Best-effort — a pathologically full store can drop even
+        // this small write, in which case the trimmed marker simply doesn't show
+        // (never a false "saved"). Only append() (finalizeSession) writes this key;
+        // reconcileActive() persists directly, so it can never spuriously set it.
+        if (!writeFailed && shed) {
+            try { Storage.setValue(KEY_LAST_OUTCOME, "trimmed"); } catch (e) { }
+        }
         return !writeFailed;
     }
 
@@ -174,7 +194,15 @@ class SessionStore {
     //! sessionToken dedup closes the append->clearActive crash window.
     hidden function reconcileActive() {
         var a = read(KEY_ACTIVE);
-        if (shouldRecover(a, history)) {
+        // Capture whether a recovery actually happens on THIS load (#83) — the
+        // event that drives the "prior ride recovered" marker. NOT the persistent
+        // per-row `recovered` stamp (which would re-fire the marker forever). This
+        // co-fires for BOTH recovery causes: #17's ungraceful stop AND #83's
+        // full-store append failure (finalizeSession keeping KEY_ACTIVE) — both
+        // honestly mean the normal durable save did not complete.
+        var willRecover = shouldRecover(a, history);
+        recoveredThisLoad = willRecover;
+        if (willRecover) {
             var d = a as Lang.Dictionary;
             d.put("recovered", true);   // rebuilt from the last checkpoint (<=1 cadence stale)
             history.add(d);
@@ -214,6 +242,15 @@ class SessionStore {
     //! a full store (the newest ride WAS saved). Mutually exclusive with
     //! lastWriteFailed(); consumed by the #28 "not saved / trimmed" footer.
     function lastWriteShed() { return shed; }
+
+    //! Save-outcome severity for the next-start footer marker (#83), folded from
+    //! the two load-time events: a checkpoint recovery this load (FAILED — the
+    //! durable save didn't complete) OUTRANKS a trim on the last onStop-ride
+    //! (TRIMMED). Both are read-once/per-load so the marker is transient. Returns a
+    //! DescriptiveStrings.SAVE_* severity (SAVE_OK = nothing to show).
+    function pendingSaveOutcome() {
+        return DescriptiveStrings.saveMarkerSeverity(recoveredThisLoad, trimmedOnLoad);
+    }
 
     function count() { return history.size(); }
     function all() { return history; }

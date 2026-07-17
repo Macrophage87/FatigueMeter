@@ -999,4 +999,15 @@ module CoverageTests {
         var firesRaised = StatusEvaluator.evaluate(raised, ctx)[:advisoryActive];
         return firesDefault == true && firesRaised == false;
     }
+    (:test)
+    function testSaveMarkerSeverityPrecedence(logger) {
+        // #83: the pure save-outcome fold. FAILED (recovered from checkpoint)
+        // OUTRANKS TRIMMED, so a mutant dropping the precedence corner fails on
+        // (true, true). SAVE_OK is drawn as nothing.
+        var okFail = (DescriptiveStrings.saveMarkerSeverity(true,  false) == DescriptiveStrings.SAVE_FAILED);
+        var okTrim = (DescriptiveStrings.saveMarkerSeverity(false, true)  == DescriptiveStrings.SAVE_TRIMMED);
+        var okOk   = (DescriptiveStrings.saveMarkerSeverity(false, false) == DescriptiveStrings.SAVE_OK);
+        var okPrec = (DescriptiveStrings.saveMarkerSeverity(true,  true)  == DescriptiveStrings.SAVE_FAILED);
+        return okFail && okTrim && okOk && okPrec;
+    }
 }

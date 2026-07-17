@@ -27,6 +27,16 @@ back to the matching item here.
     shed-until-fits keeps the newest ride and `lastWriteShed()` reports the trim;
     at the `MIN_HISTORY` floor confirm `lastWriteFailed()` and full-history-in-RAM.
     Record the observed quota-exception class in the `persist()` comment (#65).
+  - **Save marker `KEY_LAST_OUTCOME` round-trip (#83)**: on a shed (trimmed)
+    append, confirm `append()` writes `KEY_LAST_OUTCOME = "trimmed"`; on the next
+    `load()` confirm it is read into `trimmedOnLoad` **and cleared** (so a
+    subsequent restart shows no marker). Confirm the null-safe read does not crash
+    on the common absent-key path.
+  - **Retain `KEY_ACTIVE` on a full-store append (#83)**: after a storage-full
+    `finalizeSession()` append (`saved == false`), confirm `KEY_ACTIVE` survives
+    (the checkpoint is NOT cleared) and that the next start's `reconcileActive()`
+    recovers the ride and `pendingSaveOutcome()` returns `SAVE_FAILED`. Confirm
+    `KEY` (the persisted history) was genuinely left unchanged by the failed append.
 
 - [ ] **FatigueMeterView — `onUpdate` / `dc.*` render** (`source/FatigueMeterView.mc`)
   - The glance screen paints without crashing across the sensor-availability
@@ -34,6 +44,11 @@ back to the matching item here.
     grey-out behaviour. The pure geometry seams (`uncertaintyBand`,
     `defaultSnapshot`, `strapHrToken`) are unit-tested; the `dc.setColor` /
     `fillRectangle` / `drawText` calls are verified visually here.
+  - **Save marker line-2 draw (#83)**: after a trimmed/recovered prior ride,
+    confirm the footer line-2 marker (`SaveTrimmed` / `SaveRecovered`) paints; and
+    that when an advisory tag already occupies line 2 the measured append drops the
+    marker rather than clipping or evicting the tag (the `getTextWidthInPixels`
+    non-masking guard). The pure `saveMarkerSeverity` fold is unit-tested.
 
 - [ ] **FatigueMeterApp — lifecycle hooks** (`source/FatigueMeterApp.mc`)
   - `onStart` / `getInitialView` bring the field up; `onStop` finalizes the

@@ -17,6 +17,29 @@ module DescriptiveStrings {
         STATUS_NODATA = 3
     }
 
+    //! Save-outcome severity for the next-start persistence marker (#83). Module
+    //! scope (referenced qualified, e.g. DescriptiveStrings.SAVE_FAILED) — a bare
+    //! class-scoped enum would hit the SessionSchema.VERSION trap.
+    enum { SAVE_OK = 0, SAVE_FAILED = 1, SAVE_TRIMMED = 2 }
+
+    //! Pure severity fold for the save marker (#83). FAILED (a ride recovered from
+    //! its #17 checkpoint because the normal durable save did not complete)
+    //! OUTRANKS TRIMMED (older history shed to fit a full store) — never imply a
+    //! clean save when it wasn't. Plain function to match every other member here
+    //! (repo-wide `static` is class-scoped only).
+    function saveMarkerSeverity(recovered, trimmed) {
+        if (recovered) { return SAVE_FAILED; }
+        if (trimmed)   { return SAVE_TRIMMED; }
+        return SAVE_OK;
+    }
+
+    //! Descriptive copy for a save-outcome severity (#83); SAVE_OK draws nothing.
+    function saveMarkerLabel(sev) {
+        if (sev == SAVE_FAILED)  { return load(Rez.Strings.SaveRecovered); }
+        if (sev == SAVE_TRIMMED) { return load(Rez.Strings.SaveTrimmed); }
+        return "";
+    }
+
     function statusLabel(status) {
         switch (status) {
             case STATUS_FRESH:    return load(Rez.Strings.StateFresh);
