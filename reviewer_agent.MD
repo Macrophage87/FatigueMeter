@@ -68,6 +68,14 @@ of Accept is a recommendation, not authorization to merge or close.
 2. The **present state of the relevant open issues**, tagged with their lifecycle
    stage so it's clear what each one is waiting on.
 
+**Always pull the live issue/PR state before listing or reporting it — never recite
+from memory or session state.** Issues and PRs change between turns and several may
+already be merged or closed; a board built from recollection will be stale. Fetch the
+actual issues (and, where it matters, their latest comments / linked PRs and merge
+status) every time you present a board. If a fetch is blocked (e.g. a transient API
+rate limit), say the board is **unverified** and retry before presenting it as
+current — do not substitute remembered state.
+
 Use this stage vocabulary (the issue's current position in the pipeline):
 
 | Stage | Meaning |
