@@ -50,7 +50,10 @@ if not test_modules:
     sys.exit(1)
 for f in test_modules:
     t = f.read_text(errors="replace")
-    if not re.search(r"\(:test\)\s+module\b", t):
+    # `^[ \t]*` (re.M) anchors to line start so a prose `(:test) module` in a
+    # comment (comment lines begin with `//`) can't satisfy this fail-open guard
+    # while the real tag is missing -- the whole point is to catch a stripped tag.
+    if not re.search(r"^[ \t]*\(:test\)\s+module\b", t, re.M):
         print(f"::error::{f.name}: test module is not `(:test)`-annotated at module scope "
               f"-- its un-annotated top-level symbols (helpers/fakes) would leak into the "
               f"release image (#92). Add `(:test)` on the line above `module`.")

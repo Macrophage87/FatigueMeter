@@ -45,8 +45,13 @@ log = pathlib.Path(sys.argv[1]).read_text(errors="replace")
 # modules to strip the whole test surface from release builds) does NOT -- so the
 # module tags stay count-neutral. This is also robust to any future non-function
 # `(:test)` tag, exactly the mis-tally the docstring above warns about.
+# `^[ \t]*` (re.M) anchors `(:test)` to the START of a line so a prose mention in
+# a comment -- comment lines begin with `//`, never `(:test)` -- can't inflate the
+# count; `\s+function\s+\w` (\s spans the newline) still matches the canonical
+# `(:test)`-then-`function <name>` form and requires a real definition (not the
+# substring "functions", not a module/class tag).
 expected = sum(
-    len(re.findall(r"\(:test\)\s+function\s+\w", f.read_text(errors="replace")))
+    len(re.findall(r"^[ \t]*\(:test\)\s+function\s+\w", f.read_text(errors="replace"), re.M))
     for f in sorted(pathlib.Path("source").glob("*.mc"))
 )
 
