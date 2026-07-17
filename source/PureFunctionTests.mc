@@ -851,6 +851,34 @@ module PureFunctionTests {
             && noTok.equals("strap --") && nullTok.equals("strap --");
     }
 
+    // ---- DescriptiveStrings pure dispatch (#81 triage: mis-filed pure gap) ----
+    // Only the branch DISPATCH is pure; the copy content / allowed-mood validation
+    // stays a resource-harness concern. These assert the dispatch is deterministic
+    // REGARDLESS of what loadResource returns (headless it may yield "" via load()'s
+    // catch), because the discriminating parts are in-code literals.
+    (:test)
+    function testRedCharacterLabelDispatch(logger) {
+        // Cast to String (the "glyph " + load() concat can infer Object) so .equals /
+        // .length resolve, matching the repo's Object->String pattern.
+        var unknown = DescriptiveStrings.redCharacterLabel("bogus") as Lang.String;
+        var feat = DescriptiveStrings.redCharacterLabel("feat") as Lang.String;
+        var attr = DescriptiveStrings.redCharacterLabel("attrition") as Lang.String;
+        // feat/attrition prepend an in-code literal glyph ("🏅 " / "⚠ "), so both are
+        // non-empty and distinct even if the resource yields "" headless.
+        return unknown.equals("") && feat.length() > 0 && attr.length() > 0 && !feat.equals(attr);
+    }
+
+    (:test)
+    function testStatusLabelDefaultRoutesToNoData(logger) {
+        // An out-of-range status must fall through to the SAME StateNoData resource
+        // as STATUS_NODATA -> equal regardless of resource content (deterministic).
+        // Cast to String (statusLabel returns load()'s Object) so .equals compares
+        // content, matching testStatusRedKindIsEvidenceOnly's pattern.
+        var def = DescriptiveStrings.statusLabel(99) as Lang.String;
+        var nod = DescriptiveStrings.statusLabel(DescriptiveStrings.STATUS_NODATA) as Lang.String;
+        return def.equals(nod);
+    }
+
     (:test)
     function testShouldShowDegraded(logger) {
         // #28: the degraded footer marker fires only once the consecutive-failure
