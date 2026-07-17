@@ -16,7 +16,25 @@ class RingBuffer {
         // construction, so clamping once here is sufficient.
         var n = (capacity != null && capacity has :toNumber) ? capacity.toNumber() : null;
         cap = (n != null && n > 0) ? n : 1;
-        buf = new [cap];
+        // Lazy backbone (#93): start EMPTY and grow to `cap` on push, instead of
+        // committing `new [cap]` up front. Cold-start / early-ride heap then tracks
+        // ACTUAL fill -- a just-started ride pays for the ~30 samples it holds, not
+        // the full 1200-slot 20-min window. The win is the construction/first-frame
+        // moment (#90's load window) and the tighter-budget devices. All public
+        // semantics (push/toArray/latest/size/isFull/capacity/clear) are
+        // byte-for-byte identical -- only the allocation TIMING moves.
+        //
+        // TRADEOFF (honest): Monkey C `Array.add()` grows by exactly ONE element
+        // (no amortized doubling), so during the fill phase every push copies the
+        // current backbone (O(fill) per push, momentarily holding old+new ~2x for
+        // that window) until it reaches `cap`. So the SETTLED full-ride footprint is
+        // identical to the old up-front allocation (no doubling slack), but the
+        // first ~`cap` pushes trade the lower load-instant peak for per-push realloc
+        // churn -- a CPU/GC cost on the 1 Hz path, bounded by current fill, over the
+        // first ~cap seconds. Net-positive for the load window this targets; the
+        // fill-phase peak/CPU is what the #93 per-device Active-Memory profiling
+        // (AC-1, docs/release-checklist.md) must measure, not just the load instant.
+        buf = [];
         head = 0;
         count = 0;
     }
@@ -25,8 +43,14 @@ class RingBuffer {
     //! else null. Lets callers maintain O(1) running sums over the window.
     function push(v) {
         var evicted = null;
-        if (count == cap) { evicted = buf[head]; }
-        buf[head] = v;
+        if (count == cap) { evicted = buf[head]; }   // full: capture oldest before overwrite
+        // Growth invariant: while the buffer is not yet full, head advances
+        // 0,1,2,... and wraps to 0 ONLY on the push that makes count == cap, so
+        // head == buf.size() throughout the growth phase -> append is always at the
+        // end, never a sparse write. Once full (or a slot reused after clear()),
+        // head < buf.size() and we overwrite in place.
+        if (head < buf.size()) { buf[head] = v; }    // slot exists (full, or post-clear reuse)
+        else { buf.add(v); }                          // growth phase: append one slot
         head = (head + 1) % cap;
         if (count < cap) { count++; }
         return evicted;
