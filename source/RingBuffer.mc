@@ -9,8 +9,14 @@ class RingBuffer {
     hidden var count;
 
     function initialize(capacity) {
-        cap = capacity;
-        buf = new [capacity];
+        // Coerce to a positive integer (#16). Degenerate inputs (0, negative,
+        // fractional, null, or a non-numeric value) collapse to a single slot so
+        // the modulo / index math in push/latest/toArray stays well-defined and
+        // never divides by zero or indexes an empty array. cap is immutable after
+        // construction, so clamping once here is sufficient.
+        var n = (capacity != null && capacity has :toNumber) ? capacity.toNumber() : null;
+        cap = (n != null && n > 0) ? n : 1;
+        buf = new [cap];
         head = 0;
         count = 0;
     }

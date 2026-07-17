@@ -226,6 +226,44 @@ module CoverageTests {
         return okSize && okArr;
     }
 
+    // ---- RingBuffer degenerate-capacity clamp (#16) ----
+    (:test)
+    function testRingBufferZeroCapacity(logger) {
+        // Regression for #16: capacity 0 must not divide-by-zero or read OOB on push.
+        var rb = new RingBuffer(0);
+        rb.push(5);
+        var arr = rb.toArray();
+        var okCap = (rb.capacity() == 1) && (rb.size() == 1);
+        var okVals = (rb.latest() == 5) && (arr.size() == 1) && (arr[0] == 5);
+        return okCap && okVals;
+    }
+
+    (:test)
+    function testRingBufferNegativeCapacity(logger) {
+        // -3 must not throw inside `new [negative]`; clamps to a single slot.
+        var rb = new RingBuffer(-3);
+        rb.push(1);
+        return (rb.capacity() == 1) && (rb.latest() == 1);
+    }
+
+    (:test)
+    function testRingBufferFloatCapacity(logger) {
+        // 2.9 truncates to a valid length 2, then the >0 clamp applies.
+        var rb = new RingBuffer(2.9);
+        rb.push(1); rb.push(2);
+        var evicted = rb.push(3);            // full -> evict oldest (1)
+        var okCap = (rb.capacity() == 2) && (rb.size() == 2);
+        return okCap && (evicted == 1) && (rb.latest() == 3);
+    }
+
+    (:test)
+    function testRingBufferNullCapacity(logger) {
+        // null short-circuits before .toNumber() -> single-slot fallback (#16).
+        var rb = new RingBuffer(null);
+        rb.push(7);
+        return (rb.capacity() == 1) && (rb.latest() == 7);
+    }
+
     // ---- MathUtil finite-safety guards ----
     (:test)
     function testSafeDivGuardsDivByZeroAndNull(logger) {
