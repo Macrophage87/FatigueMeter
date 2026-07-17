@@ -195,6 +195,17 @@ module CoverageTests {
         return near(fit["s"], 0.001, 1e-9);
     }
 
+    (:test)
+    function testSigmoidSlopeGuardsZeroA1(logger) {
+        // #34b: a zero / non-finite SIG_A1 divisor must yield the 0.001 floor, not
+        // Inf/NaN (the bare `s < 0.001` clamp doesn't catch NaN). Also pins the
+        // live path (a1=0.5) byte-identical and the ordinary tiny-slope floor.
+        var guarded = CalibrationFit.sigmoidSlope(-0.01, 0.0);      // a1=0 -> safeDiv fallback -> floor
+        var normal  = CalibrationFit.sigmoidSlope(-0.01, 0.5);      // -4*-0.01/0.5 = 0.08 (live path)
+        var floored = CalibrationFit.sigmoidSlope(-1.0e-9, 0.5);    // tiny slope -> below floor -> 0.001
+        return near(guarded, 0.001, 1e-12) && near(normal, 0.08, 1e-9) && near(floored, 0.001, 1e-12);
+    }
+
     // ---- RingBuffer (memory-bounding invariant) ----
     (:test)
     function testRingBufferEvictsOldestWhenFull(logger) {
