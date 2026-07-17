@@ -60,6 +60,7 @@ class FatigueMeterView extends WatchUi.DataField {
     hidden var dWriteFailed;   // last session append could not persist (#18); footer surfacing tracked with #28
     hidden var dStrapHr;       // strap-HR staleness Metric — DISPLAY ONLY (#57); never fed to the filter/math
     hidden var computeFailStreak;   // consecutive compute() failures; drives the degraded footer marker (#28)
+    hidden var dSaveOutcome;        // next-start persistence marker severity (#83); DescriptiveStrings.SAVE_*
 
     //! Conservative NODATA defaults written at construction BEFORE the guarded
     //! collaborator build (§8.4, #13): if that build throws, the field is left on
@@ -135,6 +136,7 @@ class FatigueMeterView extends WatchUi.DataField {
         lastCheckpointTick = 0;
         dWriteFailed = false;
         computeFailStreak = 0;   // #28: no compute failures yet
+        dSaveOutcome = DescriptiveStrings.SAVE_OK;   // #83: nothing to show until the store reports one
         peakAfi = 0.0;
         lastFreshMatchCount = 0;
 
@@ -169,6 +171,7 @@ class FatigueMeterView extends WatchUi.DataField {
             effort = new EffortCharacterizer(cfg);
             ledger = new TrainingLoadLedger(cfg);
             sessions = new SessionStore();
+            dSaveOutcome = sessions.pendingSaveOutcome();   // #83: surface last save's outcome at next start
             fit = new FitLogger(self);
             dNumericUnlocked = cfg.numericAfiUnlocked();
             dCalibrated = CalibrationFit.isCalibrated();
@@ -404,8 +407,17 @@ class FatigueMeterView extends WatchUi.DataField {
         // append() keeps the record in the in-memory history even if the durable
         // write fails; capture the outcome so a "not saved" affordance can surface
         // it (footer rendering coordinated with #28).
-        dWriteFailed = !sessions.append(buildSessionResult(rideDrift, rideTss, driftBucketLbl));
-        sessions.clearActive();   // committed to history — drop the in-progress checkpoint (#17)
+        var saved = sessions.append(buildSessionResult(rideDrift, rideTss, driftBucketLbl));
+        dWriteFailed = !saved;
+        if (saved) {
+            sessions.clearActive();   // committed to history — drop the in-progress checkpoint (#17)
+        }
+        // else: KEEP KEY_ACTIVE (#83). A storage-full append adds to the in-memory
+        // history but leaves KEY unchanged, so the ≤one-checkpoint-stale KEY_ACTIVE
+        // is the sole durable copy — clearing it here (as the old unconditional
+        // clearActive() did) lost the ride. Retaining it lets the NEXT start's
+        // reconcileActive() recover it (token not in persisted history), which also
+        // raises the "prior ride recovered" footer marker. (Latent data-loss fix.)
     }
 
     //! Snapshot the running summary to durable Storage + refresh the FIT session
@@ -668,6 +680,22 @@ class FatigueMeterView extends WatchUi.DataField {
             line2 = "advisory on decoupling + kJ only (a1 gated) — weighted down";
         } else if (dPriorDominated) {
             line2 = "steady power: AFI prior-dominated";
+        }
+        // Persistence marker (#83): the #28 compute-degraded marker lives on LINE 1
+        // (footerText); the save-outcome marker co-locates on line 2 AFTER the
+        // calibration/advisory chain via #57's measured, non-masking append — so it
+        // never evicts the advisory/uncalibrated tag. Honest limitation: when an
+        // advisory tag already occupies line 2, the combined string usually won't
+        // fit and the marker is silently dropped (acceptable at Priority Low). When
+        // line 2 is otherwise empty (the common case) the marker takes it outright.
+        var mark = DescriptiveStrings.saveMarkerLabel(dSaveOutcome);
+        if (!mark.equals("")) {
+            if (line2.equals("")) {
+                line2 = mark;
+            } else {
+                var combined = line2 + "  ·  " + mark;
+                if (dc.getTextWidthInPixels(combined, Graphics.FONT_XTINY) <= w) { line2 = combined; }
+            }
         }
         if (!line2.equals("")) {
             dc.drawText(w / 2, y + rowH * 0.45, Graphics.FONT_XTINY, line2,
