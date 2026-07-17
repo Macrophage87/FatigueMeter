@@ -24,7 +24,8 @@ using Toybox.Math;
 //! covered in PureFunctionTests), FitLogger's FitContributor field creation +
 //! setData (its pure deriveOk partial-success rule IS covered below, #20),
 //! SessionStore's Storage-backed load/append/persist (its pure sanitize / migrate
-//! / isValidRecord / buildResult validators ARE covered below, #18) +
+//! / isValidRecord / buildResult validators ARE covered below, #18, and the
+//! shed-until-fits floor guard shouldShed, #62) +
 //! CalibrationFit.save/load (Application.Storage), FatigueMeterApp and the
 //! WatchUi-rendering parts of FatigueMeterView (its defaultSnapshot IS already
 //! covered by testViewDefaultSnapshotIsConservative), and DescriptiveStrings
@@ -555,5 +556,16 @@ module CoverageTests {
         var rd = r as Lang.Dictionary;
         var okVersion = (rd["_v"] == SessionSchema.VERSION);
         return okValid && okVersion;
+    }
+
+    (:test)
+    function testShouldShedRespectsFloor(logger) {
+        // #62: the shed-until-fits floor guard. shouldShed is the LIVE decision
+        // persist() calls, so this pins the >/>= boundary that keeps MIN_HISTORY
+        // records (a >= bug would shed the last ride the floor exists to protect).
+        var okAbove = (SessionStore.shouldShed(2, 1) == true);
+        var okAt    = (SessionStore.shouldShed(1, 1) == false);
+        var okBelow = (SessionStore.shouldShed(0, 1) == false);
+        return okAbove && okAt && okBelow;
     }
 }

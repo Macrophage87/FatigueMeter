@@ -32,12 +32,15 @@ class SessionStore {
     hidden const KEY = "fm_sessions_v1";
     hidden const KEY_BAK = "fm_sessions_v1_bak";   // retired; deleted once on load
     hidden const MAX_HISTORY = 20;
+    hidden const MIN_HISTORY = 1;   // shed-until-fits floor: never drop below the just-finished ride (#62)
 
     hidden var history;      // Array of Session Result dictionaries (newest last)
     hidden var writeFailed;  // true if the most recent append() could not persist
+    hidden var shed;         // true if the most recent SUCCESSFUL append() dropped older records to fit (#62)
 
     function initialize() {
         writeFailed = false;
+        shed = false;
         load();
     }
 
@@ -65,20 +68,56 @@ class SessionStore {
         return !writeFailed;
     }
 
-    //! Single atomic write of the whole history. Returns false (never throws) if
-    //! storage rejected the write (e.g. full); the caller keeps the in-memory copy.
+    //! Atomic write with shed-until-fits on a storage-full failure (#62). Sheds the
+    //! OLDEST record from a WORKING COPY and retries down to MIN_HISTORY, committing
+    //! the (possibly shrunk) list to `history` ONLY on a successful write — so any
+    //! non-persisting failure leaves the full in-memory history intact, honoring the
+    //! invariant append() documents above. Never throws. `shed` is set true only
+    //! when a durable write actually dropped records.
+    //!
+    //! The catch is deliberately catch-ALL. History integrity does NOT depend on the
+    //! exception type (the working-copy design makes any non-persisting path a no-op
+    //! on `history`), so no typed discriminator is landed here. A typed
+    //! `catch (e instanceof ...)` to skip shedding on a non-storable (serialization)
+    //! value is DEFERRED to the simulator step (#62): it must not be added until the
+    //! simulator confirms (a) which exception a non-storable value raises —
+    //! Lang.InvalidValueException and Lang.UnexpectedTypeException are both plausible
+    //! (the latter is this codebase's type-error exception) — and (b) that the
+    //! quota/full-store path does NOT raise that same type, else the guard would
+    //! swallow the quota case and defeat shedding entirely.
     hidden function persist() {
-        try {
-            Storage.setValue(KEY, history);
-            return true;
-        } catch (e) {
-            System.println("SessionStore: persist failed, keeping in-memory history");
-            return false;
+        shed = false;
+        var working = [];                                    // shallow copy of history
+        for (var i = 0; i < history.size(); i++) { working.add(history[i]); }
+        var dropped = 0;
+        while (true) {
+            try {
+                Storage.setValue(KEY, working);
+                if (dropped > 0) { history = working; shed = true; }   // commit the shrink on success only
+                return true;
+            } catch (e) {
+                if (!shouldShed(working.size(), MIN_HISTORY)) {
+                    System.println("SessionStore: persist failed at floor; kept full history in RAM");
+                    return false;
+                }
+                working.remove(working[0]);   // drop oldest from the COPY, retry smaller
+                dropped++;
+                System.println("SessionStore: store full — shed oldest, retry (n=" + working.size() + ")");
+            }
         }
     }
 
+    //! Shed another record only while above the floor. Pure so the floor guard is
+    //! (:test)-drivable without Storage (#62).
+    static function shouldShed(size, floor) { return size > floor; }
+
     //! True if the most recent append() could not be persisted to storage.
     function lastWriteFailed() { return writeFailed; }
+
+    //! True if the most recent SUCCESSFUL append() had to shed older records to fit
+    //! a full store (the newest ride WAS saved). Mutually exclusive with
+    //! lastWriteFailed(); consumed by the #28 "not saved / trimmed" footer.
+    function lastWriteShed() { return shed; }
 
     function count() { return history.size(); }
     function all() { return history; }
