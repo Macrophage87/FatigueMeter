@@ -6,6 +6,9 @@ using Toybox.WatchUi;
 //! forwards settings changes, and finalizes the Session Result / ledger fold when
 //! the activity ends (App.onStop is the reliable "app going away" hook for a data
 //! field). See white paper §8 for the storage/finalize model.
+//! Integration coverage (#81): the lifecycle hooks (onStart/onStop/getInitialView)
+//! are verified per-release — see docs/release-checklist.md (unconstructable in the
+//! headless harness; onStop is trivial guarded delegation to the view).
 class FatigueMeterApp extends Application.AppBase {
 
     hidden var view;

@@ -27,6 +27,10 @@ module SessionSchema {
 //! with one atomic Storage.setValue; on read the history is sanitized (bad
 //! elements dropped, unversioned records migrated) so a partially-written or
 //! foreign value can never corrupt the in-memory list (#18).
+//!
+//! Integration coverage (#81): the real Storage I/O + full-store/quota behaviour
+//! is verified per-release, not in CI — see docs/release-checklist.md (the pure
+//! sanitize/migrate/isValidRecord/buildResult/shedWrite seams ARE unit-tested).
 class SessionStore {
 
     hidden const KEY = "fm_sessions_v1";

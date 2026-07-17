@@ -11,6 +11,9 @@ using Toybox.Time;
 //! fault-isolated and returns a Signals.Metric, so a missing sensor greys only
 //! its own tile (§8.4). The DFA-α1 recompute is budgeted to every 5 s inside the
 //! primitives. onUpdate() renders each tile from its own availability.
+//! Integration coverage (#81): the onUpdate / dc.* render path is verified
+//! per-release in the simulator/on hardware — see docs/release-checklist.md (the
+//! pure geometry seams uncertaintyBand / defaultSnapshot / strapHrToken ARE tested).
 class FatigueMeterView extends WatchUi.DataField {
 
     hidden var cfg;
