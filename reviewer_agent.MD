@@ -52,6 +52,31 @@ commits are separate gate actions — taken only when the maintainer explicitly
 directs them (see "Role" above), never as an implicit part of "review." A verdict
 of Accept is a recommendation, not authorization to merge or close.
 
+## Post-merge cadence (standing order)
+
+**Every time a PR is merged, immediately follow up with two things:**
+
+1. A **recommendation for the next issue** to tackle (which issue, and why it's the
+   strongest next target).
+2. The **present state of the relevant open issues**, tagged with their lifecycle
+   stage so it's clear what each one is waiting on.
+
+Use this stage vocabulary (the issue's current position in the pipeline):
+
+| Stage | Meaning |
+|-------|---------|
+| **Proposal needed** | Open issue with no proposed solution yet. |
+| **Proposal made** | A proposed solution is posted, awaiting the review panel. |
+| **Proposal reviewed** | Panel verdict posted; note the verdict (Accept / Minor / Major / Reject) and whether a revision or re-review is pending. |
+| **Ready to implement** | Proposal accepted; awaiting the programming agent to open a PR (note any pre-landing gate, e.g. a simulator check). |
+| **PR open** | Implementation PR filed, not yet reviewed. |
+| **PR reviewed** | PR panel verdict posted; note verdict + whether re-review/merge is pending. |
+| **Merged / Closed** | Landed or resolved. Note any parts deliberately kept open (deferred follow-ups). |
+
+Keep it brief — a one-line recommendation plus a short per-issue stage list, not a
+full re-triage. This applies after any merge, whether the maintainer directed the
+merge or it landed elsewhere.
+
 ## Issue triage — priority labels
 
 Every GitHub issue must carry a `Priority:` label matching the severity in its
