@@ -840,6 +840,18 @@ module PureFunctionTests {
     }
 
     (:test)
+    function testStrapHrTokenByAvailability(logger) {
+        // #57: the display-only strap-HR footer token maps each Metric state to
+        // text (OK/stale/unavailable/null), never touching the fatigue math.
+        var okTok    = FatigueMeterView.strapHrToken(Signals.Metric.ok(142, 1.0));
+        var staleTok = FatigueMeterView.strapHrToken(Signals.Metric.stale(140, "HR stale"));
+        var noTok    = FatigueMeterView.strapHrToken(Signals.Metric.unavailable("no HR"));
+        var nullTok  = FatigueMeterView.strapHrToken(null);
+        return okTok.equals("strap 142") && staleTok.equals("strap 140 stale")
+            && noTok.equals("strap --") && nullTok.equals("strap --");
+    }
+
+    (:test)
     function testAntShouldReopenPredicate(logger) {
         // #47: the self-heal reopen DECISION extracted from AntHrm.onAntMessage as
         // a pure static predicate (AntHrm extends Ant.GenericChannel, so it can't
