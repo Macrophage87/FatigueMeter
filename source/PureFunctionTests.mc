@@ -822,6 +822,24 @@ module PureFunctionTests {
     }
 
     (:test)
+    function testUncertaintyBandClampsToBar(logger) {
+        // #30: the post-pilot band nowX ± uncW must be clamped to the bar
+        // [pad, pad+barW] -- never a negative x, never past the right edge,
+        // never a negative width. Bar spans [10, 110].
+        var pad = 10; var barW = 100;
+        // near LEFT edge, large uncW: raw [-25, 55] -> [10, 55], width 45
+        var left  = FatigueMeterView.uncertaintyBand(15, 40, pad, barW);
+        var okLeft  = (left[0] == 10) && (left[1] == 45);
+        // near RIGHT edge, large uncW: raw [60, 140] -> [60, 110], width 50
+        var right = FatigueMeterView.uncertaintyBand(100, 40, pad, barW);
+        var okRight = (right[0] == 60) && (right[1] == 50);
+        // uncW 0 -> zero-width band at nowX (no band drawn)
+        var zero  = FatigueMeterView.uncertaintyBand(50, 0, pad, barW);
+        var okZero  = (zero[0] == 50) && (zero[1] == 0);
+        return okLeft && okRight && okZero;
+    }
+
+    (:test)
     function testAntShouldReopenPredicate(logger) {
         // #47: the self-heal reopen DECISION extracted from AntHrm.onAntMessage as
         // a pure static predicate (AntHrm extends Ant.GenericChannel, so it can't

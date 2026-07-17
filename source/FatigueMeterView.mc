@@ -2,7 +2,6 @@ using Toybox.Lang;
 using Toybox.WatchUi;
 using Toybox.Graphics;
 using Toybox.Activity;
-using Toybox.Sensor;
 using Toybox.System;
 using Toybox.Time;
 
@@ -23,7 +22,6 @@ class FatigueMeterView extends WatchUi.DataField {
     hidden var sessions;
     hidden var ant;            // ANT+ HRM RR reader (null if Ant unavailable)
 
-    hidden var pendingRr;      // RR intervals (ms) received since last compute
     hidden var tick;           // ride seconds
     hidden var prevTimerMs;    // last activity-timer reading (ms) for real-dt derivation (#22)
     hidden var seeded;
@@ -77,6 +75,22 @@ class FatigueMeterView extends WatchUi.DataField {
         };
     }
 
+    //! Clamp the post-pilot uncertainty band to the status bar [pad, pad+barW]
+    //! (#30). The raw band is nowX ± uncW, which can start at a negative x
+    //! (nowX - uncW < pad) or overflow the bar's right edge (nowX + uncW >
+    //! pad + barW) — exactly when uncertainty is highest, painting the band across
+    //! the whole dial. Returns [x, width] with width >= 0. Static + pure so the
+    //! geometry is unit-testable (like defaultSnapshot on this class).
+    static function uncertaintyBand(nowX, uncW, pad, barW) {
+        var x0 = nowX - uncW;
+        var x1 = nowX + uncW;
+        if (x0 < pad)        { x0 = pad; }
+        if (x1 > pad + barW) { x1 = pad + barW; }
+        var wBand = x1 - x0;
+        if (wBand < 0) { wBand = 0; }
+        return [x0, wBand];
+    }
+
     function initialize() {
         DataField.initialize();
         ready = false;
@@ -86,7 +100,6 @@ class FatigueMeterView extends WatchUi.DataField {
         // fails partway (§8.4 -- a construction fault greys the field, it must NOT
         // brick it to the Connect IQ banner). Defaults are conservative: numeric
         // AFI locked and the "uncalibrated" tag, until a clean build proves otherwise.
-        pendingRr = [];
         tick = 0;
         prevTimerMs = null;
         seeded = false;
@@ -173,23 +186,9 @@ class FatigueMeterView extends WatchUi.DataField {
         } catch (e) { }
     }
 
-    //! Beat-to-beat RR callback. Buffers intervals for the next compute(); guarded
-    //! so a malformed packet never disturbs the compute loop.
-    function onSensorData(sensorData as Toybox.Sensor.SensorData) as Void {
-        try {
-            if (sensorData == null) { return; }
-            var arr = null;
-            // SDK member name has varied; accept either spelling.
-            if (sensorData has :heartBeatIntervals && sensorData.heartBeatIntervals != null) {
-                arr = sensorData.heartBeatIntervals;
-            } else if (sensorData has :heartBeatIntervalData && sensorData.heartBeatIntervalData != null) {
-                arr = sensorData.heartBeatIntervalData;
-            }
-            if (arr != null) {
-                for (var i = 0; i < arr.size(); i++) { pendingRr.add(arr[i]); }
-            }
-        } catch (e) { }
-    }
+    // (Removed the dead onSensorData RR callback (#31): a DataField cannot
+    // register the Sensor RR listener, so it was never invoked and its pendingRr
+    // buffer was never drained. Live RR comes from ant.drainRr() in computeInner.)
 
     // =====================================================================
     //  1 Hz COMPUTE
@@ -494,7 +493,8 @@ class FatigueMeterView extends WatchUi.DataField {
             // projection range as a shaded band = now ± uncertainty
             var uncW = (MathUtil.clamp(dAfiUnc / 100.0, 0.0, 1.0) * barW).toNumber();
             dc.setColor(0x555555, Graphics.COLOR_TRANSPARENT);
-            dc.fillRectangle(nowX - uncW, barY, 2 * uncW, barH);
+            var band = FatigueMeterView.uncertaintyBand(nowX, uncW, pad, barW);   // #30: clamp to the bar
+            dc.fillRectangle(band[0], barY, band[1], barH);
             dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
             dc.fillRectangle(nowX - 1, barY - 2, 3, barH + 4);
             dc.drawText(w / 2, y + (dialH * 0.15).toNumber(), Graphics.FONT_NUMBER_MEDIUM,
