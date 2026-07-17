@@ -768,6 +768,66 @@ module CoverageTests {
         return okStatus && okDropped && okSize && okNewest;
     }
 
+    // ---- FitLogger FitContributor routing (#81, integration seam) ----
+    // FitLogger is a plain class whose ctor already INJECTS the DataField
+    // (initialize(dataField)), so new FitLogger(fake) constructs headless. These
+    // fakes duck-type the createField/setData surface FitLogger calls through, so
+    // the tests exercise the REAL routing (finite-write / null-skip / non-finite-
+    // skip / the mkRec catch) that the pure deriveOk seam (#20) can't. NOT
+    // (:test)-tagged (would tally as errors) — the FakeShedWriter pattern.
+    class FakeFitField {
+        var last; var writes;
+        function initialize() { last = null; writes = 0; }
+        function setData(v) { last = v; writes++; }        // records each write
+    }
+    class FakeDataField {
+        var made;                 // id -> FakeFitField for every field that registered
+        hidden var reject;        // dict of id->true to reject (hits mkRec/mkSes catch), or null = accept all
+        function initialize(reject_) { made = {}; reject = reject_; }
+        // arity mirrors DataField.createField(label, id, type, options) — FitLogger.mc:58/68
+        function createField(label, id, type, options) {
+            if (reject != null && reject.hasKey(id)) { throw new Lang.Exception(); }
+            var f = new FakeFitField(); made[id] = f; return f;
+        }
+    }
+
+    (:test)
+    function testFitLoggerRoutesFiniteSkipsNull(logger) {
+        // Finite inputs write; a null input leaves its field UNSET (#20 hold-forward).
+        var df = new FakeDataField(null);
+        var fl = new FitLogger(df);                        // ctor injection, no production change
+        fl.logRecord(42.0, null, 3.5, null, null, null, null, null);   // AFI(0), F(1)=null, DECOUP(2)
+        var afi = df.made[0] as FakeFitField;
+        var fdr = df.made[1] as FakeFitField;
+        var dec = df.made[2] as FakeFitField;
+        return (afi.writes == 1) && near(afi.last, 42.0, 1e-6)
+            && (fdr.writes == 0)                            // null skipped
+            && (dec.writes == 1) && near(dec.last, 3.5, 1e-6);
+    }
+
+    (:test)
+    function testFitLoggerSkipsNonFinite(logger) {
+        // A non-finite input (built at runtime) is dropped, not written as garbage.
+        var df = new FakeDataField(null);
+        var fl = new FitLogger(df);
+        var b = 9.0e37; var inf = b * b;                   // +Inf at runtime, never a literal
+        fl.logRecord(inf, null, null, null, null, null, null, null);
+        return (df.made[0] as FakeFitField).writes == 0;
+    }
+
+    (:test)
+    function testFitLoggerPartialRejectionStillLogs(logger) {
+        // mkRec swallows one rejected field (AFI) without aborting the rest; ok
+        // stays true (deriveOk partial-success #20) and the other fields still write.
+        var reject = {}; reject.put(0, true);              // reject FLD_AFI(0) only
+        var df = new FakeDataField(reject);
+        var fl = new FitLogger(df);
+        fl.logRecord(42.0, 5.0, null, null, null, null, null, null);
+        var afiAbsent = !df.made.hasKey(0);                // AFI field never registered
+        var fdr = df.made[1] as FakeFitField;
+        return afiAbsent && (fdr.writes == 1) && near(fdr.last, 5.0, 1e-6);
+    }
+
     // ---- TrainingLoadLedger day-index + real-dt (#22) and ewmaFold guard (#34a) ----
     // NOTE: the caller-side pause->dt=0 decision lives in FatigueMeterView.computeInner
     // (view loop) and is verified by reasoning, not a pure unit test -- it needs an
