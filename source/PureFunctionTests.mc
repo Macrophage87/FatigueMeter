@@ -987,6 +987,52 @@ module PureFunctionTests {
         return prims.isStationary() == false;
     }
 
+    // ---- decouplingMetric + EF-baseline (first-ever coverage, #93) ----
+    // These drive update() through the 300-900 s EF-baseline window, then read
+    // decouplingMetric(), so they cover the previously-untested EF-baseline
+    // finalize path AND exercise the post-push curPArr/curHrArr snapshot the #93
+    // dedup feeds (a stale/wrong snapshot would throw the decoupling values off).
+    (:test)
+    function testDecouplingWarmingUpBeforeBaseline(logger) {
+        // Before efBaseline finalizes (elapsed <= 900) decoupling is not usable
+        // ("warming up"), even with HR present and a full valid power window.
+        var prims = new PrimitivesCalculator(new Config());
+        var t = 300;
+        for (var s = 0; s < 60; s++) { prims.update(200, 140, 90, null, t); t += 1; }
+        var d = prims.decouplingMetric();
+        // "warming up" is lowConf (still usable), so distinguish it from the ok
+        // branch by availability: pre-baseline it must NOT be AVAIL_OK.
+        return d.availability == Signals.AVAIL_LOW_CONF;
+    }
+
+    (:test)
+    function testDecouplingZeroForSteadyRide(logger) {
+        // A perfectly steady ride reads ~0% decoupling once the baseline lands
+        // (efWindow == efBaseline). Covers decouplingMetric's ok-branch.
+        var prims = new PrimitivesCalculator(new Config());
+        var t = 300;
+        for (var s = 0; s < 60; s++) { prims.update(200, 140, 90, null, t); t += 1; }
+        prims.update(200, 140, 90, null, 901);   // elapsed > 900 -> finalize efBaseline
+        var d = prims.decouplingMetric();
+        // AVAIL_OK proves the baseline finalized (not "warming up"); ~0% for steady.
+        return d.availability == Signals.AVAIL_OK && (d.value < 1.0) && (d.value > -1.0);
+    }
+
+    (:test)
+    function testDecouplingPositiveWhenHrDrifts(logger) {
+        // Baseline set at 140 bpm; a later HR drift to 160 lowers the window EF
+        // -> positive decoupling (cardiac drift). Pins the efBaseline -> decoupling
+        // sign/relationship through the dedup's snapshot path.
+        var prims = new PrimitivesCalculator(new Config());
+        var t = 300;
+        for (var s = 0; s < 60; s++) { prims.update(200, 140, 90, null, t); t += 1; }
+        prims.update(200, 140, 90, null, 901);   // finalize efBaseline ~ 200/140
+        var u = 902;
+        for (var s = 0; s < 120; s++) { prims.update(200, 160, 90, null, u); u += 1; }
+        var d = prims.decouplingMetric();
+        return d.availability == Signals.AVAIL_OK && (d.value > 1.0);
+    }
+
     // ---- Config band-ordering clamps (#29) ----
     (:test)
     function testOrderBandsChainsClamp(logger) {

@@ -15,6 +15,19 @@ class PrimitivesCalculator {
     hidden var winCad;         // last 10 min cadence
     hidden var rrBuf;          // last ~2 min of RR intervals (ms)
 
+    // ---- per-tick post-push snapshots (#93) ----
+    // winPower/winHr are read up to twice per tick post-push (alpha1Metric's
+    // stationarity gate + decouplingMetric). Snapshot each once, right after the
+    // pushes in update(), and have those two accessors reuse it instead of a fresh
+    // toArray() apiece -- a small 1 Hz allocation/GC saving, model-IDENTICAL because
+    // pushes only happen in update() so no buffer mutation intervenes between the
+    // snapshot and the post-push readers (the reset-branch invariant the panel
+    // confirmed). isStationary() is called PRE-push (FatigueMeterView compute
+    // ordering), so it deliberately keeps its own live read, NOT this snapshot.
+    // Initialized empty so the accessors stay callable before the first update().
+    hidden var curPArr;
+    hidden var curHrArr;
+
     // Pushed into winPower on a sensor dropout (#19). Any negative works: real
     // power is always >= 0, and NP / coasting / the sufficiency floor treat < 0 as
     // "no sample this second" rather than a 0 W coast.
@@ -51,6 +64,7 @@ class PrimitivesCalculator {
         winHr = new RingBuffer(600);
         winCad = new RingBuffer(600);
         rrBuf = new RingBuffer(400);   // 2 min can exceed 200 beats at high HR
+        curPArr = []; curHrArr = [];   // #93: empty until the first update() snapshot
         efBaseline = null;
         cadBaseline = null;
         decoupBaseline = 0.0;
@@ -167,6 +181,11 @@ class PrimitivesCalculator {
         if (hr != null && hr > 0) { winHr.push(hr); } else { winHr.push(0); }
         if (cadence != null && cadence >= 0) { winCad.push(cadence); } else { winCad.push(0); }
 
+        // #93: single post-push snapshot reused by the post-push accessors
+        // (alpha1Metric stationarity gate + decouplingMetric) this tick.
+        curPArr = winPower.toArray();
+        curHrArr = winHr.toArray();
+
         // --- capture EF / cadence baselines over minutes 5..15 ---
         // Build the baseline EF with the SAME NP window (the 10-min rolling
         // buffer) that decouplingMetric() uses for EF_window, so decoupling is an
@@ -263,8 +282,8 @@ class PrimitivesCalculator {
     //! fraction are below the configured limits (white paper §3.1). Otherwise
     //! low-confidence. Needs the baseline established (>15 min) and HR present.
     function decouplingMetric() {
-        var pArr = winPower.toArray();
-        var hrArr = winHr.toArray();
+        var pArr = curPArr;     // #93: reuse the post-push snapshot (was winPower.toArray())
+        var hrArr = curHrArr;   // #93: reuse the post-push snapshot (was winHr.toArray())
         var hrMean = nonZeroMean(hrArr);
         if (hrMean <= 0) { return Signals.Metric.unavailable("no HR"); }
         if (efBaseline == null) {
@@ -308,7 +327,7 @@ class PrimitivesCalculator {
                 "artifact " + art.format("%.0f") + "%");
         }
         // stationarity gate: within-window power CV / coasting
-        var pArr = winPower.toArray();
+        var pArr = curPArr;   // #93: reuse the post-push snapshot (was winPower.toArray())
         // Too few VALID samples can't establish stationarity (#19): with dropouts
         // now excluded, a mostly-dropout window must not read confidently steady.
         if (validCount(pArr) < Constants.MIN_VALID_POWER) {
