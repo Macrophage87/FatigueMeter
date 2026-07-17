@@ -12,7 +12,6 @@ class PrimitivesCalculator {
     hidden var powerNp;        // last 30 s of power for NP
     hidden var winPower;       // last 10 min power for EF window / steadiness
     hidden var winHr;          // last 10 min HR
-    hidden var winCad;         // last 10 min cadence
     hidden var rrBuf;          // last ~2 min of RR intervals (ms)
 
     // Pushed into winPower on a sensor dropout (#19). Any negative works: real
@@ -20,12 +19,10 @@ class PrimitivesCalculator {
     // "no sample this second" rather than a 0 W coast.
     hidden const POWER_DROPOUT = -1;
 
-    // ---- baselines captured over minutes 5..15 ----
+    // ---- EF baseline captured over minutes 5..15 ----
     hidden var efBaseline;     // Float or null
-    hidden var cadBaseline;    // Float or null
     hidden var decoupBaseline; // per-athlete early-ride decoupling baseline (0 by construction)
     hidden var baseSumEf; hidden var baseCntEf;
-    hidden var baseSumCad; hidden var baseCntCad;
 
     // ---- accumulators ----
     hidden var kjTotal;
@@ -49,13 +46,10 @@ class PrimitivesCalculator {
         powerNp = new RingBuffer(30);
         winPower = new RingBuffer(600);
         winHr = new RingBuffer(600);
-        winCad = new RingBuffer(600);
         rrBuf = new RingBuffer(400);   // 2 min can exceed 200 beats at high HR
         efBaseline = null;
-        cadBaseline = null;
         decoupBaseline = 0.0;
         baseSumEf = 0.0; baseCntEf = 0;
-        baseSumCad = 0.0; baseCntCad = 0;
         kjTotal = 0.0;
         kjWeighted = 0.0;
         kjAboveCpAcc = 0.0;
@@ -165,9 +159,10 @@ class PrimitivesCalculator {
         }
 
         if (hr != null && hr > 0) { winHr.push(hr); } else { winHr.push(0); }
-        if (cadence != null && cadence >= 0) { winCad.push(cadence); } else { winCad.push(0); }
+        // `cadence` is retained in the signature (reserved) but no longer consumed
+        // here (#97): the cadence-drift metric + its winCad window were dead code.
 
-        // --- capture EF / cadence baselines over minutes 5..15 ---
+        // --- capture EF baseline over minutes 5..15 ---
         // Build the baseline EF with the SAME NP window (the 10-min rolling
         // buffer) that decouplingMetric() uses for EF_window, so decoupling is an
         // apples-to-apples EF drift, not a 30 s-vs-10 min artifact (review #2).
@@ -178,12 +173,9 @@ class PrimitivesCalculator {
             if (npNow > 0 && hrMean > 0) {
                 baseSumEf += npNow / hrMean; baseCntEf++;
             }
-            var cadMean = nonZeroMean(winCad.toArray());
-            if (cadMean > 0) { baseSumCad += cadMean; baseCntCad++; }
         }
         if (elapsed > Constants.EF_BASELINE_END_S) {
             if (efBaseline == null && baseCntEf > 0) { efBaseline = baseSumEf / baseCntEf; }
-            if (cadBaseline == null && baseCntCad > 0) { cadBaseline = baseSumCad / baseCntCad; }
         }
 
         // --- RR buffer + DFA recompute every 5 s ---
@@ -294,12 +286,6 @@ class PrimitivesCalculator {
         return Signals.Metric.ok(dec, 1.0);
     }
 
-    //! Per-athlete decoupling drift above the early-ride baseline (§6). Since the
-    //! baseline IS the reference EF, decoupling% already expresses this drift.
-    function decouplingDriftMetric() {
-        return decouplingMetric();
-    }
-
     //! DFA-α1 with hard artifact gate AND stationarity gate (white paper §3.3).
     //! Returns value + a quality that folds artifact %, fit r2, and stationarity.
     function alpha1Metric() {
@@ -382,16 +368,6 @@ class PrimitivesCalculator {
     }
     function wBalFraction() {
         return MathUtil.safeDiv(wBal, cfg.wPrime, 1.0);
-    }
-
-    function cadenceDriftMetric() {
-        if (cadBaseline == null) {
-            return Signals.Metric.lowConf(0.0, 0.2, "warming up");
-        }
-        var cadNow = nonZeroMean(winCad.toArray());
-        if (cadNow <= 0) { return Signals.Metric.unavailable("no cadence"); }
-        var drift = (cadBaseline - cadNow) / cadBaseline * 100.0;
-        return Signals.Metric.ok(drift, 0.6);   // corroborating vote only
     }
 
     // --- helpers exposed for the filter/characterizer ---
