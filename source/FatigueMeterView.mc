@@ -24,6 +24,7 @@ class FatigueMeterView extends WatchUi.DataField {
 
     hidden var pendingRr;      // RR intervals (ms) received since last compute
     hidden var tick;           // ride seconds
+    hidden var prevTimerMs;    // last activity-timer reading (ms) for real-dt derivation (#22)
     hidden var seeded;
     hidden var finalized;
 
@@ -84,6 +85,7 @@ class FatigueMeterView extends WatchUi.DataField {
         // AFI locked and the "uncalibrated" tag, until a clean build proves otherwise.
         pendingRr = [];
         tick = 0;
+        prevTimerMs = null;
         seeded = false;
         finalized = false;
         dWriteFailed = false;
@@ -224,7 +226,18 @@ class FatigueMeterView extends WatchUi.DataField {
         prims.update(power, hr, cadence, rr, tick);
 
         // ---- ride load (TSS) accumulation — the one honest per-ride Layer-3 output ----
-        ledger.update(power, hr);
+        // Real elapsed seconds from the ACTIVITY TIMER (info.timerTime), which FREEZES
+        // while paused, so paused ticks add zero load (#22). compute() keeps firing
+        // during a pause, hence a frozen delta must map to dt=0 (not the nominal 1.0).
+        // Monotonic getTimer() is a null-only fallback before the timer is available.
+        var nowMs = (info != null && info.timerTime != null) ? info.timerTime : System.getTimer();
+        var dt = 1.0;                                   // cold-start default (prevTimerMs == null)
+        if (prevTimerMs != null) {
+            var d = (nowMs - prevTimerMs) / 1000.0;
+            dt = (d > 0.0 && d < 30.0) ? d : 0.0;       // paused/frozen -> 0; anomaly/source-switch -> 0
+        }
+        prevTimerMs = nowMs;
+        ledger.update(power, hr, dt);
 
         // ---- F(0) starts NEUTRAL (§7 revised) ----
         // The acute filter no longer seeds from a cross-ride ledger: an on-device

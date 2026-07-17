@@ -1,6 +1,7 @@
 using Toybox.Lang;
 using Toybox.Math;
 using Toybox.Time;
+using Toybox.System;   // getClockTime().timeZoneOffset for the local day-index (#22)
 
 //! LAYER 3 — Per-ride training load (white paper §5, revised).
 //!
@@ -22,14 +23,16 @@ class TrainingLoadLedger {
 
     // live within-ride accumulators
     hidden var trimpAccum;
-    hidden var secondsAccum;
+    hidden var secondsAccum;       // real elapsed seconds (Float), not a call count (#22)
+    hidden var powerSecondsAccum;  // seconds with power present, for the load-model gate (#22)
     hidden var npSumPow4;
     hidden var npCount;
 
     function initialize(config) {
         cfg = config;
         trimpAccum = 0.0;
-        secondsAccum = 0;
+        secondsAccum = 0.0;
+        powerSecondsAccum = 0.0;
         npSumPow4 = 0.0;
         npCount = 0;
     }
@@ -69,7 +72,10 @@ class TrainingLoadLedger {
     //! Retained as validated pure math (unit-tested); the on-device app no longer
     //! folds a cross-ride chronic/acute state — that lives in the platform.
     static function ewmaFold(prev, load, tau) {
-        return prev + (load - prev) / tau;
+        // tau == 0 / NaN / null -> no fold instead of Inf/NaN (#34a). safeDiv guards
+        // the division only; prev is a finite accumulator so the outer `prev +` can't
+        // leak a non-finite value. Dead on-device today (no cross-ride fold).
+        return prev + MathUtil.safeDiv(load - prev, tau, 0.0);
     }
 
     static function tsbFrom(ctlY, atlY) { return ctlY - atlY; }
@@ -78,19 +84,26 @@ class TrainingLoadLedger {
     //  WITHIN-RIDE ACCUMULATION
     // =====================================================================
 
-    function update(power, hr) {
-        secondsAccum++;
+    //! dt = real elapsed seconds since the previous update (the caller derives it
+    //! from the pause-excluding activity timer, #22). A null/negative dt accrues
+    //! nothing (defense on a now-public 3-arg method). NP stays sample-count based
+    //! (npSumPow4/npCount) rather than dt-weighted -- a separate approximation left
+    //! out of scope; negligible at the nominal ~1 Hz cadence.
+    function update(power, hr, dt) {
+        if (dt == null || dt < 0.0) { dt = 0.0; }
+        secondsAccum += dt;
         if (power != null && power >= 0) {
             // #7: same int^4 overflow as PrimitivesCalculator.normalizedPower.
             var pf = power.toFloat();
             var p2 = pf * pf;
             npSumPow4 += p2 * p2;
-            npCount++;
+            npCount++;                    // NP mean divides by this -- keep it
+            powerSecondsAccum += dt;      // seconds-with-power, for the rideLoad() gate
         }
         if (hr != null && hr > 0) {
             var coeff = cfg.sexFemale ? cfg.trimpFemaleCoeff : Constants.TRIMP_MALE_COEFF;
             var expo = cfg.sexFemale ? Constants.TRIMP_FEMALE_EXP : Constants.TRIMP_MALE_EXP;
-            trimpAccum += trimpIncrement(hr, cfg.hrRest, cfg.hrMax, 1.0, coeff, expo);
+            trimpAccum += trimpIncrement(hr, cfg.hrRest, cfg.hrMax, dt, coeff, expo);
         }
     }
 
@@ -105,7 +118,10 @@ class TrainingLoadLedger {
     //! Ride load with graceful degradation: power-TSS if power present, else
     //! HR-TRIMP (white paper §8.4 — no power → HR-TRIMP keeps the load honest).
     function rideLoad() {
-        if (npCount > secondsAccum / 4) {          // enough power samples
+        // Gate on power-SECONDS vs total seconds (not sample count vs seconds): under
+        // a throttled loop (dt>1) a samples-vs-seconds test would wrongly flip to
+        // TRIMP even with power every tick (#22).
+        if (powerSecondsAccum > secondsAccum / 4) {  // power present for enough of the ride
             return tss(secondsAccum, rideNp(), cfg.ftp);
         }
         return trimpAccum;                          // TRIMP fallback
@@ -121,9 +137,17 @@ class TrainingLoadLedger {
     //  DAY INDEX (for the session-history date stamp)
     // =====================================================================
 
+    //! Local calendar-day ordinal (days since epoch in the athlete's local time),
+    //! so a ride near local midnight is stamped on the right day. Pure/testable
+    //! (#22); offsetSeconds is the device's UTC offset (DST-inclusive).
+    static function localDayIndex(utcSeconds, offsetSeconds) {
+        return ((utcSeconds + offsetSeconds) / 86400).toNumber();
+    }
+
     hidden function dayIndex() {
-        var now = Time.now();
-        return (now.value() / 86400).toNumber();
+        // timeZoneOffset already folds in DST for "now", so the stamp lands on the
+        // rider's LOCAL calendar day rather than the UTC one (#22).
+        return localDayIndex(Time.now().value(), System.getClockTime().timeZoneOffset);
     }
     function dayIndexPublic() { return dayIndex(); }
 }

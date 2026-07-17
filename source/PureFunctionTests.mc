@@ -528,7 +528,7 @@ module PureFunctionTests {
         var cfg = new Config();
         var ledger = new TrainingLoadLedger(cfg);
         for (var i = 0; i < 600; i++) {
-            ledger.update(300, 150);         // INTEGER power on purpose
+            ledger.update(300, 150, 1.0);    // INTEGER power on purpose (dt=1.0, #22 arity)
         }
         var np = ledger.rideNp();
         var load = ledger.rideLoad();

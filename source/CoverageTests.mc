@@ -568,4 +568,63 @@ module CoverageTests {
         var okBelow = (SessionStore.shouldShed(0, 1) == false);
         return okAbove && okAt && okBelow;
     }
+
+    // ---- TrainingLoadLedger day-index + real-dt (#22) and ewmaFold guard (#34a) ----
+    // NOTE: the caller-side pause->dt=0 decision lives in FatigueMeterView.computeInner
+    // (view loop) and is verified by reasoning, not a pure unit test -- it needs an
+    // integration harness, like the other view-loop behaviour noted in the SCOPE block
+    // above. The ledger's own dt handling (accumulation, the load gate) IS covered here.
+
+    (:test)
+    function testLocalDayIndexAppliesOffset(logger) {
+        // #22: the date stamp must be the LOCAL calendar day. Calls the pure static
+        // directly (clock-free) rather than the instance dayIndex().
+        var utc = 10 * 86400 + 3600;                                          // 01:00 UTC, epoch-day 10
+        var okLocal = (TrainingLoadLedger.localDayIndex(utc, -8 * 3600) == 9);   // US Pacific -> prev day
+        var okUtc   = (TrainingLoadLedger.localDayIndex(utc, 0) == 10);          // old UTC behaviour
+        var utc2 = 20 * 86400 + 23 * 3600;                                   // 23:00 UTC
+        var okAhead = (TrainingLoadLedger.localDayIndex(utc2, 13 * 3600) == 21); // NZDT -> next day
+        return okLocal && okUtc && okAhead;
+    }
+
+    (:test)
+    function testTrimpIncrementScalesWithDt(logger) {
+        // #22: dt scales the increment linearly; a hard-coded dt=1 regression makes two==one.
+        var one = TrainingLoadLedger.trimpIncrement(150.0, 60.0, 190.0, 1.0, 0.64, 1.92);
+        var two = TrainingLoadLedger.trimpIncrement(150.0, 60.0, 190.0, 2.0, 0.64, 1.92);
+        return near(two, 2.0 * one, 1e-9) && (one > 0.0);
+    }
+
+    (:test)
+    function testUpdateDtAccumulatesRealTime(logger) {
+        // #22: one 10 s update must equal ten 1 s updates (same HR, no power -> TRIMP
+        // path). This is the regression gate for update() actually USING dt, which a
+        // secondsAccum++ / hard-coded-1.0 mutant fails.
+        var cfg = new Config();
+        var big   = new TrainingLoadLedger(cfg);
+        var small = new TrainingLoadLedger(cfg);
+        big.update(null, 150, 10.0);
+        for (var i = 0; i < 10; i++) { small.update(null, 150, 1.0); }
+        return near(big.rideLoad(), small.rideLoad(), 1e-6);
+    }
+
+    (:test)
+    function testPowerGateSurvivesThrottling(logger) {
+        // #22: dt=5 throttling. The OLD samples-vs-seconds gate reads npCount=20 vs
+        // secondsAccum/4=25 -> false -> TRIMP fallback (0, no HR) despite power every
+        // tick. The seconds-vs-seconds powerSecondsAccum gate (100 > 25) picks TSS.
+        // Also fails if npCount++ were dropped (rideNp -> 0 -> tss 0).
+        var cfg = new Config();
+        var l = new TrainingLoadLedger(cfg);
+        for (var i = 0; i < 20; i++) { l.update(200, null, 5.0); }   // power only, dt=5
+        return l.rideLoad() > 0.0;   // TSS path -> >0; a wrong TRIMP fallback would be 0
+    }
+
+    (:test)
+    function testEwmaFoldGuardsZeroTau(logger) {
+        // #34a: tau == 0 -> return prev unchanged (no Inf/NaN); tau > 0 -> normal fold.
+        var guarded = TrainingLoadLedger.ewmaFold(5.0, 10.0, 0.0);   // tau 0 -> prev
+        var normal  = TrainingLoadLedger.ewmaFold(0.0, 10.0, 2.0);   // 0 + 10/2
+        return near(guarded, 5.0, 1e-9) && near(normal, 5.0, 1e-9);
+    }
 }
