@@ -86,8 +86,9 @@ back to the matching item here.
     where a throw is uncatchable). **Anti-rot trigger: any new init-path constructor
     must be added to the §8.4.1 init-contract audit table** (and checked against both
     sides) before release. The static tripwire is `scripts/check_init_contract.py`
-    R1 (constructor placement, #116) / R2 (`method(:hidden)` cross-scope, #114); the
-    dynamic net is #113's boot + ≥1-compute-tick.
+    R1 (constructor placement, #116) / R2 (`.createField(` confinement, #116) /
+    R3 (`method(:hidden)` cross-scope, #114); the dynamic net is #113's boot +
+    ≥1-compute-tick.
   - **First-compute-time (#103):** the first tick runs the deferred collaborator build
     (`SessionStore`/config/ANT, **not** FitLogger — now eager) + `registerSensors()` +
     a full `compute()` in one 1 Hz slice under the compute watchdog. Open the sim
