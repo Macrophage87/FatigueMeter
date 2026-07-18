@@ -49,6 +49,38 @@ back to the matching item here.
     that when an advisory tag already occupies line 2 the measured append drops the
     marker rather than clipping or evicting the tag (the `getTextWidthInPixels`
     non-masking guard). The pure `saveMarkerSeverity` fold is unit-tested.
+  - **Render-first construction (#103)**: `initialize()` writes only the NODATA
+    snapshot and defers the collaborator build + `registerSensors()` to a one-shot
+    `ensureBuilt()` at the top of `computeInner()`. Verify the field **paints the
+    §8.4 baseline immediately on add** (before any activity/compute) and never shows
+    the stuck "IQ…" load badge; then that the first `compute()` builds the
+    collaborators (`ready` flips true) and live tiles populate.
+  - **First-compute-time (#103):** the first tick now runs the whole collaborator
+    build + `registerSensors()` + a full `compute()` in one 1 Hz slice under the
+    compute watchdog. Open the sim **Active Memory / timing** on the primary target
+    and confirm tick 1 completes without a watchdog trip; if it runs long, that
+    concentration — not an OOM — is the cause, and the build should be split further.
+  - **On-device A/B for #90/#104 (hardware-only):** the sim can't reproduce the
+    device-only ANT init path, so this runs on an Edge + paired ANT+ strap.
+    1. **Build-identity precondition (do this FIRST, before reading any A/B result).**
+       The A/B is meaningless unless the device is running *this* sideloaded build.
+       Confirm: (i) the `.prg` was built with the **correct `-d` device target** for
+       the unit under test; (ii) the device firmware is **≥ `minSdkVersion 4.1.0`**
+       (Settings → About; a device below the manifest floor silently refuses to run
+       the field and can masquerade as "still stuck"); (iii) the sideload replaced
+       the old field (remove the pre-#103 copy first so you aren't reading a stale
+       install). Only once all three hold does the A/B distinguish code from environment.
+    2. **A/B:** confirm this build **paints the §8.4 baseline** where the pre-#103
+       build stuck at "IQ…". A rendered baseline = render-first did its job (the hang,
+       if any, is now relocated to the compute path, not the load path).
+    3. **Fallback — still sticks at "IQ…" after step 1 passes:** the strand is *not*
+       the deferred ANT open, so bisect the remaining first-frame surface. In
+       `ensureBuilt()`, temporarily stub the collaborators back in one at a time and
+       re-A/B to isolate the offender; the prime suspects are `FitLogger`'s field
+       creation (`new FitLogger(self)` → `createField`) and the `SessionStore`
+       Storage reads (`new SessionStore()` / `pendingSaveOutcome()`), which are the
+       only remaining ctors that touch device-only runtime. Move whichever one stalls
+       out of the first-frame path (defer or guard it) and re-verify.
 
 - [ ] **FatigueMeterApp — lifecycle hooks** (`source/FatigueMeterApp.mc`)
   - `onStart` / `getInitialView` bring the field up; `onStop` finalizes the
