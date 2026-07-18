@@ -36,6 +36,7 @@ class FatigueMeterView extends WatchUi.DataField {
     hidden var peakAfi;
     hidden var lastFreshMatchCount;
     hidden var ready;          // true only after every collaborator built OK (§8.4, #13)
+    hidden var builtAttempted; // #103: ensureBuilt() has run once (render-first deferral)
 
     // display snapshot (written by compute, read by onUpdate)
     hidden var dStatus;
@@ -158,12 +159,30 @@ class FatigueMeterView extends WatchUi.DataField {
         dPowerAvail = snap[:powerAvail];
         dStationary = snap[:stationary];
 
-        // Guarded construction (mirrors registerSensors()): a corrupt/legacy
-        // property that makes any collaborator ctor or a Storage/Properties read
-        // throw must not fail the whole DataField to the CIQ banner. Monkey C
-        // fails forward, so a SINGLE `ready` flag -- flipped true only when every
-        // collaborator built -- gates the hot paths, rather than fragile per-field
-        // null checks that would miss effort/ledger/sessions/fit.
+        // Render-first (#103): DEFER the guarded collaborator build + registerSensors()
+        // out of initialize() into a one-shot ensureBuilt() at the top of
+        // computeInner(). initialize() now returns having written ONLY the NODATA
+        // snapshot above, so the view ALWAYS constructs and onUpdate paints the §8.4
+        // baseline BEFORE any collaborator ctor, Storage read, or ANT
+        // GenericChannel.open() runs. A construction fault -- or a device-only init
+        // HANG (the ANT open is the #90/#104 suspect; AC-1 refuted a construction
+        // OOM) -- can therefore no longer strand the load at the "IQ..." badge: the
+        // field degrades to the rendered NODATA baseline instead of never showing a
+        // frame. `ready` stays false until ensureBuilt() completes a clean build.
+        builtAttempted = false;
+    }
+
+    //! Lazy, one-shot collaborator build (#103), invoked at the top of
+    //! computeInner(). Runs at most once (`builtAttempted`). This is verbatim the
+    //! guarded build that used to live in initialize() -- only its TIMING moved
+    //! (construction -> first compute), so the field renders its NODATA baseline
+    //! first. `ready` flips true only on a clean build (§8.4). registerSensors()
+    //! stays a separate guarded step (own try/catch), exactly as before, so an ANT
+    //! failure never blocks the collaborator build and vice-versa. Note: a hang in
+    //! here now lands on the compute path (post-first-frame), never the load path.
+    hidden function ensureBuilt() {
+        if (builtAttempted) { return; }
+        builtAttempted = true;
         try {
             cfg = new Config();
             prims = new PrimitivesCalculator(cfg);
@@ -179,7 +198,6 @@ class FatigueMeterView extends WatchUi.DataField {
         } catch (e) {
             ready = false;   // any collaborator may be null -> stay on NODATA snapshot
         }
-
         registerSensors();
     }
 
@@ -242,7 +260,8 @@ class FatigueMeterView extends WatchUi.DataField {
     }
 
     hidden function computeInner(info) {
-        if (!ready) { return; }   // construction failed -> stay on the NODATA snapshot
+        ensureBuilt();            // #103: lazy one-shot build (render-first deferral)
+        if (!ready) { return; }   // not (yet) built / build failed -> stay on the NODATA snapshot
         tick++;
 
         var power = (info != null) ? sanitize(info.currentPower) : null;

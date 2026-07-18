@@ -49,6 +49,15 @@ back to the matching item here.
     that when an advisory tag already occupies line 2 the measured append drops the
     marker rather than clipping or evicting the tag (the `getTextWidthInPixels`
     non-masking guard). The pure `saveMarkerSeverity` fold is unit-tested.
+  - **Render-first construction (#103)**: `initialize()` writes only the NODATA
+    snapshot and defers the collaborator build + `registerSensors()` to a one-shot
+    `ensureBuilt()` at the top of `computeInner()`. Verify the field **paints the
+    §8.4 baseline immediately on add** (before any activity/compute) and never shows
+    the stuck "IQ…" load badge; then that the first `compute()` builds the
+    collaborators (`ready` flips true) and live tiles populate. **On-device A/B for
+    #90/#104:** on an Edge + paired ANT+ strap, confirm this build renders where the
+    pre-#103 build stuck at "IQ…" — the sim can't reproduce the device-only ANT
+    init path, so this check is hardware-only.
 
 - [ ] **FatigueMeterApp — lifecycle hooks** (`source/FatigueMeterApp.mc`)
   - `onStart` / `getInitialView` bring the field up; `onStop` finalizes the
