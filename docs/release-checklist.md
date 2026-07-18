@@ -37,6 +37,19 @@ back to the matching item here.
     (the checkpoint is NOT cleared) and that the next start's `reconcileActive()`
     recovers the ride and `pendingSaveOutcome()` returns `SAVE_FAILED`. Confirm
     `KEY` (the persisted history) was genuinely left unchanged by the failed append.
+  - **Recovery boot with a live checkpoint present (#113)**: mid-ride, stop
+    recording and **force-quit** the field (battery pull / OS kill) so a valid
+    in-progress `KEY_ACTIVE` checkpoint is left behind, then restart the field on
+    the primary **Edge 1050** and let it run **past the first compute tick** — not
+    just first paint: render-first paints the NODATA baseline *before*
+    `ensureBuilt()` constructs `SessionStore`, so the `reconcileActive() -> persist()
+    -> method(:tryWrite)` recovery chain (the uncatchable #109 class) only executes
+    on tick 1. Confirm the field **recovers the ride, paints live tiles, and does
+    NOT stick at the "IQ…" load badge or throw a System Error on tick 1**. (The
+    headless `(:test)` counterpart — `source/RecoveryBootTests.mc` — drives this
+    same recovery chain on the sim in the required `simulate` job; this manual step
+    confirms it on real hardware, where the device-only stored-state that provoked
+    #90 actually lives.)
 
 - [ ] **FatigueMeterView — `onUpdate` / `dc.*` render** (`source/FatigueMeterView.mc`)
   - The glance screen paints without crashing across the sensor-availability
