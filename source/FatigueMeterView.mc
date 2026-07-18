@@ -159,31 +159,56 @@ class FatigueMeterView extends WatchUi.DataField {
         dPowerAvail = snap[:powerAvail];
         dStationary = snap[:stationary];
 
-        // Render-first (#103): DEFER the guarded collaborator build + registerSensors()
-        // out of initialize() into a one-shot ensureBuilt() at the top of
-        // computeInner(). initialize() now returns having written ONLY the NODATA
-        // snapshot above, so the view ALWAYS constructs and onUpdate paints the §8.4
-        // baseline BEFORE any collaborator ctor, Storage read, or ANT
-        // GenericChannel.open() runs. A construction FAULT (a ctor that throws) is
-        // fully absorbed -- ensureBuilt()'s try/catch leaves `ready` false and the
-        // field stays on the rendered NODATA baseline. A device-only init HANG (a
-        // synchronous never-returns, the ANT open is the #90/#104 suspect; AC-1
-        // refuted a construction OOM) is NOT cured, only RELOCATED: it moves off the
-        // load path onto the compute path, so the field paints ONE §8.4 baseline
-        // frame first and THEN the compute thread freezes on that tick -- a state the
-        // 1 Hz compute watchdog can kill, unlike the pre-#103 load-time strand at the
-        // "IQ..." badge that showed no frame at all. `ready` stays false until
-        // ensureBuilt() completes a clean build.
+        // FitContributor field creation is INIT-ONLY (Connect IQ contract):
+        // FitContributor.createField() is legal ONLY during a DataField's
+        // initialize(). #116 regression -- #103/#108 render-first deferred
+        // `new FitLogger(self)` (whose ctor calls createField via
+        // createRecordFields/createSessionFields -> mkRec/mkSes) into ensureBuilt()
+        // on the COMPUTE path, so createField ran on tick 1 (out of phase) and raised
+        // an UNCATCHABLE `System Error: 'Failed invoking '` that bypasses every §8.4
+        // try/catch (mkRec's, FitLogger.initialize()'s, ensureBuilt()'s, AND
+        // compute()'s top-level guard) and bricks the field one frame after the NODATA
+        // baseline paints. So FitLogger is constructed EAGERLY here -- BOTH its 8
+        // record fields and 6 session fields register inside the legal init window.
+        // Safe to run eager: FitLogger does NO Storage and NO ANT I/O (only createField
+        // + println), so it is NOT the #90/#104 load-HANG suspect (that is the ANT
+        // GenericChannel.open() in registerSensors(), which stays deferred). And
+        // FitLogger.initialize() is TOTAL -- every createField is double-guarded and
+        // `ok` derives from what actually registered -- so this never throws out of
+        // initialize(). Runs after DataField.initialize() above, so `self` is a valid
+        // DataField. See docs/release-checklist.md and #115 (init-contract invariant).
+        fit = new FitLogger(self);
+
+        // Render-first (#103): DEFER the remaining guarded collaborator build +
+        // registerSensors() out of initialize() into a one-shot ensureBuilt() at the
+        // top of computeInner(). initialize() now returns having written ONLY the
+        // NODATA snapshot above (plus the eager FitLogger fields), so the view ALWAYS
+        // constructs and onUpdate paints the §8.4 baseline BEFORE any DEFERRED
+        // collaborator ctor, Storage read, or ANT GenericChannel.open() runs
+        // (FitContributor field creation is the one ctor that MUST stay eager, above).
+        // A construction FAULT (a deferred ctor that throws) is fully absorbed --
+        // ensureBuilt()'s try/catch leaves `ready` false and the field stays on the
+        // rendered NODATA baseline. A device-only init HANG (a synchronous
+        // never-returns, the ANT open is the #90/#104 suspect; AC-1 refuted a
+        // construction OOM) is NOT cured, only RELOCATED: it moves off the load path
+        // onto the compute path, so the field paints ONE §8.4 baseline frame first and
+        // THEN the compute thread freezes on that tick -- a state the 1 Hz compute
+        // watchdog can kill, unlike the pre-#103 load-time strand at the "IQ..." badge
+        // that showed no frame at all. `ready` stays false until ensureBuilt()
+        // completes a clean build.
         builtAttempted = false;
     }
 
     //! Lazy, one-shot collaborator build (#103), invoked at the top of
-    //! computeInner(). Runs at most once (`builtAttempted`). This is verbatim the
-    //! guarded build that used to live in initialize() -- only its TIMING moved
-    //! (construction -> first compute), so the field renders its NODATA baseline
-    //! first. `ready` flips true only on a clean build (§8.4). registerSensors()
-    //! stays a separate guarded step (own try/catch), exactly as before, so an ANT
-    //! failure never blocks the collaborator build and vice-versa.
+    //! computeInner(). Runs at most once (`builtAttempted`). This is the guarded
+    //! build that used to live in initialize(), MINUS `new FitLogger(self)` -- that
+    //! one collaborator stays eager in initialize() because FitContributor field
+    //! creation is init-only (#116; see the comment there). Everything here is a
+    //! Storage/ANT/config collaborator whose TIMING moved (construction -> first
+    //! compute), so the field renders its NODATA baseline first. `ready` flips true
+    //! only on a clean build (§8.4). registerSensors() stays a separate guarded step
+    //! (own try/catch), exactly as before, so an ANT failure never blocks the
+    //! collaborator build and vice-versa.
     //!
     //! Two costs of moving this to first-compute, stated honestly:
     //!  (a) A synchronous HANG in here (e.g. ANT open()) is NOT caught or cured --
@@ -206,7 +231,6 @@ class FatigueMeterView extends WatchUi.DataField {
             ledger = new TrainingLoadLedger(cfg);
             sessions = new SessionStore();
             dSaveOutcome = sessions.pendingSaveOutcome();   // #83: surface last save's outcome at next start
-            fit = new FitLogger(self);
             dNumericUnlocked = cfg.numericAfiUnlocked();
             dCalibrated = CalibrationFit.isCalibrated();
             ready = true;

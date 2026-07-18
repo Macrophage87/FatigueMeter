@@ -45,6 +45,25 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
       - run: ./scripts/check_manifest_appid.sh
 
+  # ------------------------------------------------------- init-contract lint
+  # REQUIRED (#116). Deterministic, runner-free, no SDK: fails if
+  # `new FitLogger(` sits anywhere but FatigueMeterView.initialize() or if
+  # `.createField(` appears outside FitLogger.mc. FitContributor.createField() is
+  # INIT-ONLY on Connect IQ; #108's render-first deferred it onto the compute path
+  # and shipped an uncatchable `System Error: 'Failed invoking '` that bricks the
+  # field after one frame (#116) -- bypassing every §8.4 try/catch, so neither the
+  # compile nor the (:test) run catches it. This static containment check is the one
+  # gate that WOULD have caught #108 pre-merge. It owns exactly the lexical
+  # invariant; the broader init/compute-crash class is #113's dynamic boot->=1-tick
+  # net. Required: in ci-required.needs, no continue-on-error.
+  init-contract:
+    name: Init-contract lint (FitContributor init-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+      - run: python3 scripts/check_init_contract.py
+
   # ------------------------------------------------- compile (--unit-test) gate
   # SDK-backed compile gate. We run the pre-built matco/connectiq-tester Docker
   # IMAGE as the job `container` (rather than the matco/action-connectiq-tester
@@ -344,6 +363,6 @@ jobs:
     name: ci-required
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [ manifest-lint, test, simulate, release-build ]
+    needs: [ manifest-lint, init-contract, test, simulate, release-build ]
     steps:
-      - run: echo "manifest lint + unit-test compile + unit-test run + release build all passed"
+      - run: echo "manifest lint + init-contract lint + unit-test compile + unit-test run + release build all passed"

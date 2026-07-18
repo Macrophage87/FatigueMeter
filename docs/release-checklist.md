@@ -49,17 +49,30 @@ back to the matching item here.
     that when an advisory tag already occupies line 2 the measured append drops the
     marker rather than clipping or evicting the tag (the `getTextWidthInPixels`
     non-masking guard). The pure `saveMarkerSeverity` fold is unit-tested.
-  - **Render-first construction (#103)**: `initialize()` writes only the NODATA
-    snapshot and defers the collaborator build + `registerSensors()` to a one-shot
-    `ensureBuilt()` at the top of `computeInner()`. Verify the field **paints the
-    §8.4 baseline immediately on add** (before any activity/compute) and never shows
-    the stuck "IQ…" load badge; then that the first `compute()` builds the
-    collaborators (`ready` flips true) and live tiles populate.
-  - **First-compute-time (#103):** the first tick now runs the whole collaborator
-    build + `registerSensors()` + a full `compute()` in one 1 Hz slice under the
-    compute watchdog. Open the sim **Active Memory / timing** on the primary target
-    and confirm tick 1 completes without a watchdog trip; if it runs long, that
-    concentration — not an OOM — is the cause, and the build should be split further.
+  - **Render-first construction (#103)**: `initialize()` writes the NODATA snapshot
+    **and eagerly constructs `FitLogger`** (FitContributor field creation is init-only,
+    see next bullet), then defers the *remaining* Storage/ANT/config collaborator build
+    + `registerSensors()` to a one-shot `ensureBuilt()` at the top of `computeInner()`.
+    Verify the field **paints the §8.4 baseline immediately on add** (before any
+    activity/compute) and never shows the stuck "IQ…" load badge; then that the first
+    `compute()` builds the deferred collaborators (`ready` flips true) and live tiles
+    populate.
+  - **FitContributor field creation is INIT-ONLY (#116 — required CI lint):**
+    `FitContributor.createField()` is legal only during `initialize()`. #108 deferred
+    `new FitLogger(self)` (its ctor calls `createField`) onto the compute path, which
+    raised an **uncatchable `System Error: 'Failed invoking '` on tick 1** that
+    bypassed every §8.4 try/catch and bricked the field one frame after the baseline.
+    `scripts/check_init_contract.py` (required, runner-free) now fails if `new FitLogger(`
+    sits anywhere but `initialize()`, or `.createField(` appears outside `FitLogger.mc`
+    — **that static lint is the definitive confirmation this class is fixed** (no device
+    needed). On-device, the fix means the field must survive **past tick 1** into live
+    tiles, not merely paint one frame.
+  - **First-compute-time (#103):** the first tick runs the deferred collaborator build
+    (`SessionStore`/config/ANT, **not** FitLogger — now eager) + `registerSensors()` +
+    a full `compute()` in one 1 Hz slice under the compute watchdog. Open the sim
+    **Active Memory / timing** on the primary target and confirm tick 1 completes
+    without a watchdog trip; if it runs long, that concentration — not an OOM — is the
+    cause, and the build should be split further.
   - **On-device A/B for #90/#104 (hardware-only):** the sim can't reproduce the
     device-only ANT init path, so this runs on an Edge + paired ANT+ strap.
     1. **Build-identity precondition (do this FIRST, before reading any A/B result).**
@@ -73,14 +86,21 @@ back to the matching item here.
     2. **A/B:** confirm this build **paints the §8.4 baseline** where the pre-#103
        build stuck at "IQ…". A rendered baseline = render-first did its job (the hang,
        if any, is now relocated to the compute path, not the load path).
-    3. **Fallback — still sticks at "IQ…" after step 1 passes:** the strand is *not*
-       the deferred ANT open, so bisect the remaining first-frame surface. In
-       `ensureBuilt()`, temporarily stub the collaborators back in one at a time and
-       re-A/B to isolate the offender; the prime suspects are `FitLogger`'s field
-       creation (`new FitLogger(self)` → `createField`) and the `SessionStore`
-       Storage reads (`new SessionStore()` / `pendingSaveOutcome()`), which are the
-       only remaining ctors that touch device-only runtime. Move whichever one stalls
-       out of the first-frame path (defer or guard it) and re-verify.
+    3. **Disambiguate #116 from the still-open #90 hang.** After the #116 fix the ANT
+       `GenericChannel.open()` **still runs on tick 1** in `ensureBuilt()`, so a
+       persistent original-#90 hang looks **identical** to an unfixed #116 ("one frame,
+       then dead"). Read `CIQ_LOG`: the **absence** of the `createField`
+       `System Error: 'Failed invoking '` on the record/session-field stack means #116
+       is fixed *even if* the field still fails — that residual is the separate #90
+       ANT hang, not this regression. (#116 itself is confirmed statically by the CI
+       lint above; the device step exists to characterise the remaining #90 failure.)
+    4. **Fallback — still sticks at "IQ…" after step 1 passes:** the strand is a
+       *deferred* first-frame ctor (FitLogger is no longer deferred, so it is ruled
+       out). In `ensureBuilt()`, temporarily stub the deferred collaborators back in
+       one at a time and re-A/B; the remaining device-only-runtime suspects are the
+       ANT open (`registerSensors()`) and the `SessionStore` Storage reads
+       (`new SessionStore()` / `pendingSaveOutcome()`). Move whichever one stalls out
+       of the first-frame path (defer or guard it) and re-verify.
 
 - [ ] **FatigueMeterApp — lifecycle hooks** (`source/FatigueMeterApp.mc`)
   - `onStart` / `getInitialView` bring the field up; `onStop` finalizes the
