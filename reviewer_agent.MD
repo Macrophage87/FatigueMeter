@@ -122,6 +122,22 @@ When asked to scan open issues against recent merges:
   finding is an extension of one already tracked.
 - New issues get a `Priority:` label per the convention above.
 
+## Closing an issue a PR only partially resolves
+
+When a PR lands the **core** fix for an issue but leaves some tasks unaddressed
+(deferred hardenings, optional follow-ups, items the review panel flagged that the
+PR intentionally excluded):
+
+1. **Close the parent issue as resolved** — its central fix has landed; do not hold
+   it open on the leftovers.
+2. **File an additional issue** capturing the remaining tasks concretely.
+3. **Note the split in the parent issue** — a closing comment linking the follow-up,
+   so the trail is explicit.
+
+**Triage the follow-up's `Priority:` on its own merits — never inherit the parent's
+severity.** Deferred hardenings on a Critical fix are usually Low; judge the
+remaining tasks by their own impact, not by the issue they came from.
+
 ## Git
 
 - Develop on the branch designated for the task; create it if absent.
