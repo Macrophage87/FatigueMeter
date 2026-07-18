@@ -164,11 +164,16 @@ class FatigueMeterView extends WatchUi.DataField {
         // computeInner(). initialize() now returns having written ONLY the NODATA
         // snapshot above, so the view ALWAYS constructs and onUpdate paints the §8.4
         // baseline BEFORE any collaborator ctor, Storage read, or ANT
-        // GenericChannel.open() runs. A construction fault -- or a device-only init
-        // HANG (the ANT open is the #90/#104 suspect; AC-1 refuted a construction
-        // OOM) -- can therefore no longer strand the load at the "IQ..." badge: the
-        // field degrades to the rendered NODATA baseline instead of never showing a
-        // frame. `ready` stays false until ensureBuilt() completes a clean build.
+        // GenericChannel.open() runs. A construction FAULT (a ctor that throws) is
+        // fully absorbed -- ensureBuilt()'s try/catch leaves `ready` false and the
+        // field stays on the rendered NODATA baseline. A device-only init HANG (a
+        // synchronous never-returns, the ANT open is the #90/#104 suspect; AC-1
+        // refuted a construction OOM) is NOT cured, only RELOCATED: it moves off the
+        // load path onto the compute path, so the field paints ONE §8.4 baseline
+        // frame first and THEN the compute thread freezes on that tick -- a state the
+        // 1 Hz compute watchdog can kill, unlike the pre-#103 load-time strand at the
+        // "IQ..." badge that showed no frame at all. `ready` stays false until
+        // ensureBuilt() completes a clean build.
         builtAttempted = false;
     }
 
@@ -178,8 +183,18 @@ class FatigueMeterView extends WatchUi.DataField {
     //! (construction -> first compute), so the field renders its NODATA baseline
     //! first. `ready` flips true only on a clean build (§8.4). registerSensors()
     //! stays a separate guarded step (own try/catch), exactly as before, so an ANT
-    //! failure never blocks the collaborator build and vice-versa. Note: a hang in
-    //! here now lands on the compute path (post-first-frame), never the load path.
+    //! failure never blocks the collaborator build and vice-versa.
+    //!
+    //! Two costs of moving this to first-compute, stated honestly:
+    //!  (a) A synchronous HANG in here (e.g. ANT open()) is NOT caught or cured --
+    //!      try/catch only traps throws, not never-returns. It is RELOCATED off the
+    //!      load path: the field paints one baseline frame, then THIS tick freezes.
+    //!      The win is that the frozen state is on the watchdog-killable compute
+    //!      thread and the user has seen a §8.4 frame, not that the hang is gone.
+    //!  (b) COMPUTE-TIME CONCENTRATION: the first tick now does the full collaborator
+    //!      build + registerSensors() + a full compute() in a single 1 Hz slice,
+    //!      under the compute watchdog. This is one-shot (guarded by builtAttempted),
+    //!      so only tick 1 is heavy; every later tick is the old steady-state cost.
     hidden function ensureBuilt() {
         if (builtAttempted) { return; }
         builtAttempted = true;
