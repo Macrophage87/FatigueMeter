@@ -12,14 +12,22 @@ using Toybox.System;
 //! compute loop (white paper §8.4).
 class FitLogger {
 
-    // record-message field ids (developer field ids must be unique per app)
+    // record-message developer field ids (must be unique per app AMONG registered
+    // fields). #136 Build 1 (Option B) registers only FLD_AFI..FLD_WBAL (ids 0-4);
+    // FLD_KJW/FLD_FEAT/FLD_ATTR are DEFERRED to Build 2 (not registered here), so
+    // their ids carry no live FIT field yet — FLD_KJW's value (5) is therefore free
+    // for the Build-1 TSS session probe below.
     enum {
         FLD_AFI = 0, FLD_F = 1, FLD_DECOUP = 2, FLD_A1 = 3,
         FLD_WBAL = 4, FLD_KJW = 5, FLD_FEAT = 6, FLD_ATTR = 7
     }
-    // session-message field ids
+    // session-message developer field ids. #136 Build 1 registers ONLY SFLD_TSS,
+    // renumbered 20 -> 5 so every Build-1 field sits in the low 0-5 id range: the
+    // id-cap hypothesis (`fieldId < N`) is unrefuted, so all registered ids must be
+    // low. id 5 is unused among Build-1's registered fields (FLD_KJW at 5 is
+    // deferred/uncreated). The rest are deferred to Build 2 and keep placeholder ids.
     enum {
-        SFLD_TSS = 20, SFLD_START_FAT = 21, SFLD_END_FAT = 22,
+        SFLD_TSS = 5, SFLD_START_FAT = 21, SFLD_END_FAT = 22,
         SFLD_FAT_ADDED = 23, SFLD_PEAK_AFI = 24, SFLD_RED_FEAT = 25,
         SFLD_RED_ATTR = 26, SFLD_KJW = 27
     }
@@ -27,11 +35,13 @@ class FitLogger {
     hidden var rec;        // dictionary id -> field (record)
     hidden var ses;        // dictionary id -> field (session)
     hidden var ok;
+    hidden var nFields;    // #136: global createField-attempt ordinal (FM_FLD diag)
 
     function initialize(dataField) {
         rec = {};
         ses = {};
         ok = false;
+        nFields = 0;   // #136: reset the FM_FLD ordinal per DataField instance
         // #130: FitContributor.createField() is a permission-linked method. On a
         // binary where FitContributor is not *effective* (e.g. the entitlement was
         // not baked into the packaged/signed .prg), createField is not bound as an
@@ -91,49 +101,63 @@ class FitLogger {
     //! unavailable" footer marker so silent ride-data loss is visible.
     function loggingAvailable() { return ok; }
 
+    // #136 diagnostic: the device aborts UNCATCHABLY on the Nth registered
+    // developer field (root cause #136). Each mk* logs `FM_FLD try #<ord> id=<id>
+    // <TYPE> '<label>'` BEFORE the createField and `FM_FLD ok ...` AFTER it returns.
+    // On the uncatchable abort the `try` line prints but the `ok` line never does,
+    // and no further `try` line follows — so a fresh CIQ_LOG pins the exact aborting
+    // ordinal, fieldId, and message type (the three variables Build 2 must separate:
+    // count-cap vs id-cap vs per-type). A CATCHABLE rejection instead prints the
+    // "unavailable" line and execution continues to the next field.
     hidden function mkRec(df, id, label, units) {
+        nFields++;
+        System.println("FM_FLD try #" + nFields + " id=" + id + " REC '" + label + "'");
         try {
             var f = df.createField(label, id, FitContributor.DATA_TYPE_FLOAT,
                 { :mesgType => FitContributor.MESG_TYPE_RECORD, :units => units });
             rec[id] = f;
+            System.println("FM_FLD ok  #" + nFields + " id=" + id + " '" + label + "'");
         } catch (e) {
             System.println("FitLogger: record field '" + label + "' unavailable");
         }
     }
 
     hidden function mkSes(df, id, label, units) {
+        nFields++;
+        System.println("FM_FLD try #" + nFields + " id=" + id + " SES '" + label + "'");
         try {
             var f = df.createField(label, id, FitContributor.DATA_TYPE_FLOAT,
                 { :mesgType => FitContributor.MESG_TYPE_SESSION, :units => units });
             ses[id] = f;
+            System.println("FM_FLD ok  #" + nFields + " id=" + id + " '" + label + "'");
         } catch (e) {
             System.println("FitLogger: session field '" + label + "' unavailable");
         }
     }
 
+    // #136 Build 1 (Option B): register only 5 record fields (ids 0-4). kJ_weighted
+    // (5), FeatScore (6) and AttritionScore (7) are DEFERRED to Build 2 — the device
+    // aborts uncatchably on the 7th registered developer field (root cause #136), so
+    // Build 1 stays at 6 total (5 record + 1 session) to GUARANTEE a rendered frame
+    // (6 registrations are already observed on-device) while the FM_FLD log pins the
+    // cap model. Feat/Attrition are `docs/traceability.md`-flagged off the advisory
+    // critical path; on-device red-typing (EffortCharacterizer) is unaffected — only
+    // their FIT export pauses. Build 2 grows the set back once the cap is measured.
     hidden function createRecordFields(df) {
         mkRec(df, FLD_AFI,    "AFI",         "idx");
         mkRec(df, FLD_F,      "F_drift",     "bpm");
         mkRec(df, FLD_DECOUP, "decoupling",  "%");
         mkRec(df, FLD_A1,     "DFA_a1",      "");
         mkRec(df, FLD_WBAL,   "Wbal",        "J");
-        mkRec(df, FLD_KJW,    "kJ_weighted", "kJ");
-        mkRec(df, FLD_FEAT,   "FeatScore",   "");
-        mkRec(df, FLD_ATTR,   "AttritionScore", "");
     }
 
+    // #136 Build 1: register only TSS, at low id 5 (see enum note) — the render-safe
+    // "low-id session field" probe. If it registers, a session-message field works
+    // at a low id, so the constraint is not per-type session-specialness. ride_drift
+    // / peak_AFI / red_feat_s / red_attr_s / durability_kJ are DEFERRED to Build 2.
+    // (start_fatigue / fatigue_added stay intentionally unexported per §7, as before.)
     hidden function createSessionFields(df) {
-        mkSes(df, SFLD_TSS,       "TSS",          "");
-        // end_fatigue is the ride-INDUCED cardiovascular drift (acute F from a
-        // neutral start). start_fatigue / fatigue_added are intentionally NOT
-        // exported: a pre-ride residual can't be computed from ride data (§7
-        // revised), and exporting a neutral-0 or ledger-guessed value to Garmin /
-        // intervals.icu would duplicate or contradict the authoritative load record.
-        mkSes(df, SFLD_END_FAT,   "ride_drift",   "bpm");
-        mkSes(df, SFLD_PEAK_AFI,  "peak_AFI",     "idx");
-        mkSes(df, SFLD_RED_FEAT,  "red_feat_s",   "s");
-        mkSes(df, SFLD_RED_ATTR,  "red_attr_s",   "s");
-        mkSes(df, SFLD_KJW,       "durability_kJ","kJ");
+        mkSes(df, SFLD_TSS, "TSS", "");
     }
 
     hidden function setRec(id, v) {
@@ -153,6 +177,9 @@ class FitLogger {
     //! forward, so a dropped sensor reads as a held (flat) value rather than a
     //! true gap (see issue #20). A missing sensor never blocks logging of the
     //! other fields.
+    // Signature is unchanged from the full field set: setRec gates on
+    // `rec.hasKey(id)`, so the #136 Build-1 deferred fields (FLD_KJW/FEAT/ATTR, not
+    // registered) simply no-op here — no caller change at FatigueMeterView.
     function logRecord(afi, f, decoup, a1, wbal, kjw, feat, attr) {
         if (!ok) { return; }
         setRec(FLD_AFI, afi);
@@ -160,19 +187,21 @@ class FitLogger {
         setRec(FLD_DECOUP, decoup);
         setRec(FLD_A1, a1);
         setRec(FLD_WBAL, wbal);
-        setRec(FLD_KJW, kjw);
-        setRec(FLD_FEAT, feat);
-        setRec(FLD_ATTR, attr);
+        setRec(FLD_KJW, kjw);      // #136 Build 1: deferred field, setRec no-ops
+        setRec(FLD_FEAT, feat);    // #136 Build 1: deferred field, setRec no-ops
+        setRec(FLD_ATTR, attr);    // #136 Build 1: deferred field, setRec no-ops
     }
 
-    //! Write the session summary developer fields at ride end.
+    //! Write the session summary developer fields at ride end. As with logRecord,
+    //! setSes gates on `ses.hasKey(id)`, so the #136 Build-1 deferred session fields
+    //! (only TSS is registered) no-op — signature and caller are unchanged.
     function logSession(summary) {
         if (!ok) { return; }
         setSes(SFLD_TSS, summary[:tss]);
-        setSes(SFLD_END_FAT, summary[:endFatigue]);
-        setSes(SFLD_PEAK_AFI, summary[:peakAfi]);
-        setSes(SFLD_RED_FEAT, summary[:redFeatS]);
-        setSes(SFLD_RED_ATTR, summary[:redAttrS]);
-        setSes(SFLD_KJW, summary[:durabilityKj]);
+        setSes(SFLD_END_FAT, summary[:endFatigue]);   // #136 Build 1: deferred, no-ops
+        setSes(SFLD_PEAK_AFI, summary[:peakAfi]);      // #136 Build 1: deferred, no-ops
+        setSes(SFLD_RED_FEAT, summary[:redFeatS]);     // #136 Build 1: deferred, no-ops
+        setSes(SFLD_RED_ATTR, summary[:redAttrS]);     // #136 Build 1: deferred, no-ops
+        setSes(SFLD_KJW, summary[:durabilityKj]);      // #136 Build 1: deferred, no-ops
     }
 }
