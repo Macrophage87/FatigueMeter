@@ -39,6 +39,7 @@ class SessionStore {
     hidden const KEY_LAST_OUTCOME = "fm_last_outcome_v1";  // read-once trim marker (#83)
     hidden const MAX_HISTORY = 20;
     hidden const MIN_HISTORY = 1;   // shed-until-fits floor: never drop below the just-finished ride (#62)
+    hidden const RECOVER_MARKER_CAP = 3;   // #112: after this many failed-persist recoveries, stop RE-firing the recovery marker (KEY_ACTIVE is still retained + retried — the ride is never dropped)
 
     hidden var history;      // Array of Session Result dictionaries (newest last)
     hidden var writeFailed;  // true if the most recent append() could not persist
@@ -99,27 +100,47 @@ class SessionStore {
     //! loop with the real tryWrite() writer, and commits the (possibly shrunk) list
     //! to `history` ONLY on a successful write — so any non-persisting failure leaves
     //! the full in-memory history intact, honoring the invariant append() documents
-    //! above. Never throws. `shed` is set true only when a durable write dropped
-    //! records. The loop itself now lives in shedWrite() so its commit-on-success /
+    //! above. `shed` is set true only when a durable write dropped records. The loop
+    //! itself now lives in shedWrite() so its commit-on-success /
     //! keep-full-history-on-floor invariants are unit-testable with a fake writer.
+    //!
+    //! Never throws — now ENFORCED by the wrapping try/catch (#112), not merely
+    //! emergent. A dispatch-time throw (e.g. a re-`hidden` `tryWrite` Symbol-Not-Found,
+    //! #106/#109) or any unexpected error collapses to the SAME `false` return as the
+    //! floor path, i.e. degrades to `writeFailed = true` instead of propagating
+    //! uncaught through append()/onStop or aborting construction via reconcileActive().
+    //! Both callers (append(), reconcileActive()) route through here, so this one seam
+    //! closes the swallowed-throw hole at both sites; the loud-but-safe outcome is
+    //! preserved (a caught failure still retains KEY_ACTIVE and surfaces SAVE_FAILED).
     hidden function persist() {
-        shed = false;   // reset: a later NON-shedding success must not leak a stale shed==true
-        // `as Lang.Array` so the copy is a general Array, not the zero-length
-        // `Array[]` the type-checker infers for a bare `[]` literal (which rejects
-        // index reads like working[0]).
-        var working = [] as Lang.Array;                      // shallow copy of history
-        for (var i = 0; i < history.size(); i++) { working.add(history[i]); }
+        shed = false;   // reset: a throw or a later NON-shedding success must not leak a stale shed==true
+        try {
+            // `as Lang.Array` so the copy is a general Array, not the zero-length
+            // `Array[]` the type-checker infers for a bare `[]` literal (which rejects
+            // index reads like working[0]).
+            var working = [] as Lang.Array;                      // shallow copy of history
+            for (var i = 0; i < history.size(); i++) { working.add(history[i]); }
 
-        var res = shedWrite(working, MIN_HISTORY, method(:tryWrite));
-        if (res[2] == true) {                                // Boolean status -> plain ==, no Object? method call
-            if ((res[1] as Lang.Number) > 0) {               // dropped > 0: commit the shrink on success only
-                history = res[0] as Lang.Array;
-                shed = true;
+            var res = shedWrite(working, MIN_HISTORY, method(:tryWrite));
+            if (res[2] == true) {                                // Boolean status -> plain ==, no Object? method call
+                if ((res[1] as Lang.Number) > 0) {               // dropped > 0: commit the shrink on success only
+                    history = res[0] as Lang.Array;
+                    shed = true;
+                }
+                return true;
             }
-            return true;
+            System.println("SessionStore: persist failed at floor; kept full history in RAM");
+            return false;                                        // floor path: history untouched, shed stays false
+        } catch (e) {
+            // #112: any throw reaching here (dispatch-time Symbol-Not-Found, an
+            // unexpected serialization error, etc.) degrades to the floor outcome.
+            // `history` is untouched (we only reassign it AFTER a successful write,
+            // and `working` is a copy); `shed` stays false. Correctness does not
+            // depend on the exception class (the typed quota/serialization
+            // discriminator remains the #65 manual-sim item).
+            System.println("SessionStore: persist threw; degraded to write-failed (kept full history in RAM)");
+            return false;
         }
-        System.println("SessionStore: persist failed at floor; kept full history in RAM");
-        return false;                                        // floor path: history untouched, shed stays false
     }
 
     //! Pure shed-until-fits driver (#62/#65). Calls `writer.invoke(work)`; on a
@@ -221,9 +242,21 @@ class SessionStore {
         // full-store append failure (finalizeSession keeping KEY_ACTIVE) — both
         // honestly mean the normal durable save did not complete.
         var willRecover = shouldRecover(a, history);
-        recoveredThisLoad = willRecover;
         if (willRecover) {
             var d = a as Lang.Dictionary;
+            // #112: bound the recurring marker. A valid checkpoint that keeps failing
+            // to persist (a truly full store, or a non-storable poison record) would,
+            // pre-#112, re-fire recoveredThisLoad -> SAVE_FAILED on EVERY boot forever
+            // and permanently occupy the active slot. Read the prior failed-attempt
+            // count and SUPPRESS the marker once it reaches the cap — but keep
+            // recovering + retrying + retaining, so the ride is NEVER dropped and
+            // still saves the instant storage frees. `lastWriteFailed()` and the
+            // retained KEY_ACTIVE remain the durable "not saved" signal; only the
+            // repeating footer nag is silenced (after up to RECOVER_MARKER_CAP shows).
+            // Human-facing consequence (the post-cap SAVE_OK-while-writeFailed mute)
+            // and why it is safe: see pendingSaveOutcome()'s #112 intentional-mute note.
+            var attempts = recoverAttemptsOf(d);
+            recoveredThisLoad = !shouldSuppressRecoveryMarker(attempts, RECOVER_MARKER_CAP);
             d.put("recovered", true);   // rebuilt from the last checkpoint (<=1 cadence stale)
             history.add(d);
             while (history.size() > MAX_HISTORY) { history.remove(history[0]); }
@@ -231,10 +264,34 @@ class SessionStore {
                 clearActive();          // durably in history -- safe to drop the checkpoint
             } else {
                 writeFailed = true;     // surface via lastWriteFailed(); KEY_ACTIVE survives -> retried next load()
+                // #112: best-effort bump of the attempt counter on the RETAINED
+                // checkpoint so the marker converges across boots. This write can
+                // ITSELF fail in the very full-store condition that caused the persist
+                // failure -> then the count simply doesn't advance and we degrade to
+                // today's retain+nag (never worse, never data loss). checkpoint() is
+                // try/catch-guarded. Correctness ("never drop a valid ride") is
+                // unconditional; convergence (silencing the nag) is best-effort.
+                d.put("recoverAttempts", attempts + 1);
+                checkpoint(d);
             }
         } else {
+            recoveredThisLoad = false;
             clearActive();              // invalid / already-committed / token-less -> drop the stale slot
         }
+    }
+
+    //! Pure #112: once a recovered-but-unpersistable checkpoint has been retried
+    //! `cap` times, stop re-raising the recovery/SAVE_FAILED marker (the ride is
+    //! still retained + retried — this only bounds the recurring footer nag). Pure
+    //! so the convergence boundary is (:test)-drivable without Storage.
+    static function shouldSuppressRecoveryMarker(attempts, cap) { return attempts >= cap; }
+
+    //! Pure #112: read the failed-recovery attempt count off a checkpoint dict,
+    //! defaulting to 0 for a fresh checkpoint (absent key) or any non-Number value.
+    static function recoverAttemptsOf(rec) {
+        if (!(rec instanceof Lang.Dictionary)) { return 0; }
+        var v = (rec as Lang.Dictionary)["recoverAttempts"];
+        return (v instanceof Lang.Number) ? v : 0;
     }
 
     //! Pure: recover this snapshot iff it is a valid Session Result carrying a
@@ -268,6 +325,22 @@ class SessionStore {
     //! durable save didn't complete) OUTRANKS a trim on the last onStop-ride
     //! (TRIMMED). Both are read-once/per-load so the marker is transient. Returns a
     //! DescriptiveStrings.SAVE_* severity (SAVE_OK = nothing to show).
+    //!
+    //! #112 intentional-mute note: this folds `recoveredThisLoad`, which
+    //! reconcileActive() deliberately SUPPRESSES once a checkpoint has failed to
+    //! persist RECOVER_MARKER_CAP times. So after the cap the human-facing marker
+    //! goes SAVE_OK (silence — SAVE_OK renders the empty string, NOT a false
+    //! "Saved ✓") EVEN WHILE `lastWriteFailed()` is still true and KEY_ACTIVE still
+    //! holds the un-saved ride. That mute is by design (bounding the recurring
+    //! recovery nag), and it is SAFE because the ride is provably retained + retried
+    //! every boot (never dropped) and saves the instant storage frees. The durability
+    //! state is preserved PROGRAMMATICALLY via lastWriteFailed()/KEY_ACTIVE, not on
+    //! the footer, after the cap. A dedicated persistent-but-quiet "not saved
+    //! (retrying)" footer state driven off lastWriteFailed() (a new user-facing
+    //! severity) is intentionally OUT OF SCOPE for this hardening; the safety of the
+    //! post-cap SAVE_OK-while-writeFailed state is verified by the #112
+    //! release-checklist manual step (not (:test)-able — forcing a real persist
+    //! failure is non-deterministic in the sim, #65).
     function pendingSaveOutcome() {
         return DescriptiveStrings.saveMarkerSeverity(recoveredThisLoad, trimmedOnLoad);
     }

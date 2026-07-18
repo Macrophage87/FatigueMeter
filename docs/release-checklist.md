@@ -50,6 +50,27 @@ back to the matching item here.
     same recovery chain on the sim in the required `simulate` job; this manual step
     confirms it on real hardware, where the device-only stored-state that provoked
     #90 actually lives.)
+  - **Recovery-marker convergence under a persistently-failing store (#112)**: fill
+    Storage so `persist()` genuinely fails (the manual full-store setup, per #65),
+    leave a valid in-progress `KEY_ACTIVE`, then reboot the field **`RECOVER_MARKER_CAP`
+    (3) + 1 or more times**. Confirm on every boot: (i) the field paints (§8.4, no
+    brick); (ii) the ride is **never dropped** — `KEY_ACTIVE` still holds the same
+    `sessionToken` each boot; (iii) the "not saved" recovery marker shows for the
+    first ~3 boots then **stops re-firing** (the best-effort `recoverAttempts`
+    counter reaching the cap), while `persist()` keeps retrying so the ride saves the
+    instant storage frees; **(iv) the intentional-mute is SAFE** — on the boots AFTER
+    the cap, verify the footer is **silent** (`pendingSaveOutcome() == SAVE_OK`, the
+    empty string — not a false "Saved") **while** `lastWriteFailed()` is still `true`
+    **and** `KEY_ACTIVE` still holds the ride. This is the exact
+    `SAVE_OK`-while-`writeFailed`+`KEY_ACTIVE`-retained combination that a headless
+    `(:test)` cannot force (it needs a real persist failure, non-deterministic in the
+    sim, #65) and that RecoveryBootTests Fixture 7 deliberately does **not** cover
+    (there persist SUCCEEDS, so its `SAVE_OK` is honest). What CI **does** gate: the
+    pure boundary (`shouldSuppressRecoveryMarker`) and the suppressed *terminal state*
+    (Fixture 7, seeded at the cap). What is verified **here**: the cross-boot counter
+    write-back under a real failing store, and that the post-cap footer mute never
+    hides a dropped ride (durability is preserved programmatically via
+    `lastWriteFailed()`/`KEY_ACTIVE`, per `pendingSaveOutcome()`'s #112 note).
 
 - [ ] **FatigueMeterView — `onUpdate` / `dc.*` render** (`source/FatigueMeterView.mc`)
   - The glance screen paints without crashing across the sensor-availability

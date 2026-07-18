@@ -191,4 +191,39 @@ module RecoveryBootTests {
         var okRecovered = (latest["recovered"] == true);     // stamped by reconcileActive (SessionStore.mc:227)
         return okCount && okNoFail && okCleared && okNewest && okRecovered;
     }
+
+    // ---- Fixture 7: recovered checkpoint AT the attempt cap — marker suppressed, ride still kept (#112) ----
+    (:test)
+    function testRecoveryBootSuppressesMarkerAtCapButKeepsRide(logger) {
+        // #112 non-destructive convergence, exercised in the LIVE reconcileActive
+        // path (no persist-failure injection needed — suppression is driven by the
+        // seeded attempt count, not by a failing write). Seed a valid, fresh-token
+        // checkpoint that ALSO carries recoverAttempts == RECOVER_MARKER_CAP (3),
+        // modeling a checkpoint that already nagged the cap number of times. The ride
+        // is STILL recovered (count 1, token-identity on the committed row, KEY_ACTIVE
+        // cleared on the durable write) but the recurring recovery marker is SUPPRESSED
+        // (SAVE_OK, not SAVE_FAILED). This is the deterministic A/B against Fixture 1
+        // (attempts 0 -> SAVE_FAILED shown): same recovery, marker bounded, ride never
+        // dropped. (The cross-boot best-effort counter-WRITE under a real failing
+        // persist is the one part a headless (:test) can't force — release-checklist.)
+        //
+        // SCOPE NOTE (test-integrity, PR review): here persist() SUCCEEDS (empty sim
+        // store), so KEY_ACTIVE is cleared and the ride IS durably saved — SAVE_OK is
+        // therefore HONEST. This fixture does NOT (and cannot headlessly) cover the
+        // riskier post-cap combination SAVE_OK *while* writeFailed==true AND KEY_ACTIVE
+        // retained (which needs a real persist failure, non-deterministic in-sim, #65).
+        // That intentional-mute-is-safe case is the #112 release-checklist manual step;
+        // do not read this fixture as proving "SAVE_OK at cap is always fine".
+        clearAll();
+        var chk = validRecord(11, 424243);
+        chk.put("recoverAttempts", 3);              // == RECOVER_MARKER_CAP -> marker suppressed
+        Storage.setValue(KEY_ACTIVE, chk);
+        var s = new SessionStore();
+        var okCount = (s.count() == 1);
+        var latest = s.latest() as Lang.Dictionary;
+        var okToken = (latest["sessionToken"] == 424243);       // token-identity: the SAME ride recovered
+        var okCleared = (Storage.getValue(KEY_ACTIVE) == null); // durable write succeeded -> slot cleared
+        var okSuppressed = (s.pendingSaveOutcome() == DescriptiveStrings.SAVE_OK);  // #112: marker suppressed at cap
+        return okCount && okToken && okCleared && okSuppressed;
+    }
 }
