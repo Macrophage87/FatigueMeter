@@ -160,7 +160,23 @@ class SessionStore {
     //! Lang.InvalidValueException and Lang.UnexpectedTypeException are both plausible
     //! for the full-store path; confirming the exact class is a one-time MANUAL sim
     //! run on the digest-pinned SDK image (release-checklist item), never a CI gate.
-    hidden function tryWrite(work) {
+    //!
+    //! MUST NOT be `hidden` (#106): persist() passes `method(:tryWrite)` into the
+    //! STATIC shedWrite(), which then does `writer.invoke(work)`. A bound `method()`
+    //! reference to a PRIVATE (hidden) instance method fails to resolve when invoked
+    //! from that other (static) scope, raising an UNCATCHABLE "Symbol Not Found /
+    //! Failed invoking <symbol>" at the invoke site — NOT inside tryWrite (its body
+    //! never runs). Because the first persist() runs inside initialize() via
+    //! load()->reconcileActive() whenever a prior ride left an in-progress
+    //! checkpoint (ungraceful stop), the crash aborts construction BEFORE `ready`
+    //! is set; try/catch cannot catch it, so §8.4's NODATA baseline never paints
+    //! and the field hangs on the Connect IQ loading badge forever (root cause of
+    //! #90 — device-only because it needs prior stored ride/checkpoint state the
+    //! simulator lacks by default). Reproduced on -d and -r (release) edge1050
+    //! builds; un-hiding is the fix (verified: pre/post-persist both print, no
+    //! crash). The injected-writer test seam (CoverageTests FakeShedWriter) is
+    //! unaffected. Keep this method public.
+    function tryWrite(work) {
         try { Storage.setValue(KEY, work); return 1; }
         catch (e) { return 0; }
     }
