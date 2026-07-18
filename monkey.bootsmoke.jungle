@@ -1,0 +1,17 @@
+# FatigueMeter — boot-smoke build VARIANT (#124). Used ONLY by the advisory
+# boot-smoke CI job to build the no-`-t` boot binary; it NEVER ships.
+#
+# Identical to monkey.jungle EXCEPT the sourcePath swaps the shipping no-op
+# BootSmoke stub (source-bootsmoke-stub) for the FM_TICK-emitting variant
+# (source-bootsmoke). Because the FM_TICK literal lives ONLY on this variant's
+# sourcePath, no shipping artifact can contain it (provable by construction; the
+# check_boot_residue.sh gate re-confirms it on the built -d .prg).
+#
+# DRIFT NOTE (#124, panel Minor 2 acknowledgement): this is a hand-maintained
+# near-copy of monkey.jungle. A future change to monkey.jungle's manifest/
+# resourcePath/base.sourcePath must be mirrored here. Kept a standalone file
+# (rather than refactoring the required build) deliberately; monkeyc has no
+# generic build-variant beyond device/`--unit-test`.
+project.manifest = manifest.xml
+base.resourcePath = resources
+base.sourcePath = source;source-bootsmoke

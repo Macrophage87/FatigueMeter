@@ -270,3 +270,55 @@ Both are valid and sometimes better:
 - **Self‑hosted runner** with the SDK pre‑baked: needed only if you can't use a hosted‑runner‑pullable image (e.g. air‑gapped, or you want the real GUI simulator). Costs a persistent host; on a public repo add a fork guard (`if: github.event.pull_request.head.repo.fork == false`) so untrusted PR code never runs on it. Note a 1 GB free‑tier VM is marginal for the JVM compiler + Qt simulator — give it swap and expect slowness.
 
 For most apps, the **hosted‑runner + prebuilt image** path in §4 is the least‑effort way to a real gate.
+
+---
+
+## 12. Boot-smoke gate (#124) — headless DataField boot, advisory-first
+
+The `simulate` gate runs the pure `(:test)` suite (`monkeydo … -t`), which cannot
+construct `FatigueMeterView extends WatchUi.DataField` — so it never exercises the
+real DataField *lifecycle*. The **boot-smoke** job (`.github/workflows/ci.yml`)
+boots the real compiled field with `monkeydo` **WITHOUT `-t`**, so the sim
+free-runs `compute()` at ~1 Hz, and hands the tick stream + any `CIQ_LOG.YML` to a
+fail-closed parser. It targets the crash classes the sim *does* raise — the
+#109/#114 `Symbol Not Found` and the render-first `ensureBuilt()`-on-tick-1
+recovery crash. It is **not** #116 (the sim does not enforce `createField`'s
+init-only window — that stays `check_init_contract.py` R1/R2 + the on-device step).
+
+### Pieces
+- **`source-bootsmoke-stub/BootSmoke.mc`** (shipping no-op) vs **`source-bootsmoke/BootSmoke.mc`**
+  (emits `FM_TICK <n>`). `compute()` calls `BootSmoke.tick(tick)` unconditionally;
+  `monkey.jungle` selects the **stub** (so shipping binaries carry no `FM_TICK`
+  literal **by construction**), `monkey.bootsmoke.jungle` selects the emitter.
+- **`scripts/run_boot_smoke.sh`** — standalone runner (duplicates the `run_ciq_tests.sh`
+  lifecycle; see drift note below). Drops `-t`; treats `timeout` rc **124/137 as the
+  expected healthy steady state** (a free-run is always SIGKILLed) and a clean early
+  exit (rc 0) as the anomaly; copies `CIQ_LOG.YML` next to the stdout log.
+- **`scripts/check_boot_smoke.py`** — fail-closed verdict: PASS iff `FM_TICK` count ≥ K(2)
+  **and** ≥ the liveness floor **and** rc ∈ {124,137} **and** no crash marker on
+  **either** channel. Empty/missing log ⇒ FAIL.
+- **`scripts/check_boot_residue.sh`** — proves the `FM_TICK` literal is absent from
+  shipping source **and** the built `-d` `.prg` (scan the flat `.prg`, never the `-e`
+  `.iq` ZIP, which can false-clean).
+
+### AC-1 go/no-go (why it's advisory first)
+All spike data was **Windows SDK 9.2**; the Linux behaviour is unproven. The job is
+`continue-on-error` and **out of `ci-required.needs`**, and it dumps the three facts
+a human needs before promotion: **(a)** does a no-`-t` boot free-run `compute()` ≥ K
+ticks on the Linux image; **(b)** does the sim write `CIQ_LOG.YML` on Linux (the
+runner only captured stdout before #124); **(c)** a **per-class** map of which
+channel (stdout / `CIQ_LOG.YML`) surfaces each targeted class. Only after these are
+confirmed — and the **liveness floor calibrated** from the measured tick-rate, and an
+**AC-5 ≥10-run RED/GREEN** differential demonstrated (inject a real #109-class crash →
+RED, `main` → GREEN, zero flakes) — is `boot-smoke` added to `ci-required.needs`.
+
+### Hard-stop rules (no fake-green)
+- **If a no-`-t` boot does NOT free-run `compute()` on Linux**, #124 is a **documented
+  dead-end**: leave the job advisory/failing, wire nothing. Do not force a gate.
+- **If a targeted class surfaces on NEITHER channel on Linux**, that class is silently
+  undetectable by this gate — it must **dead-end (RED / not-wired)**, never pass.
+- **Lifecycle drift risk (accepted):** `run_boot_smoke.sh` *duplicates* the
+  `run_ciq_tests.sh` sim lifecycle rather than refactoring the required script. A
+  future fix to HOME/device-def resolution or the readiness probe there will **not**
+  propagate here and must be mirrored. A shared-helper refactor is a separate,
+  independently-reviewed follow-up once boot-smoke is promoted.

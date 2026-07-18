@@ -345,11 +345,74 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
       - run: python3 scripts/check_traceability.py
 
+  # ----------------------------------------------- boot-smoke gate (advisory)
+  # ADVISORY (#124). Boots the REAL compiled DataField headlessly with `monkeydo`
+  # WITHOUT `-t` (so the sim free-runs compute() at ~1 Hz) and hands the tick
+  # stream + any CIQ_LOG.YML to the fail-closed parser. This reaches the dynamic
+  # DataField-lifecycle crash classes the (:test) suite structurally cannot (the
+  # View is unconstructable headless) — the #109/#114 Symbol-Not-Found and the
+  # render-first ensureBuilt()-on-tick-1 recovery crash. NOT #116 (the sim can't
+  # raise createField-off-init; that stays init-contract R1/R2 + on-device).
+  #
+  # ADVISORY-FIRST / go-no-go (#124 AC-1): this is a diagnostic on the pinned Linux
+  # image. It is `continue-on-error` and OUT of `ci-required.needs`, and it DUMPS
+  # the three go/no-go facts (a: does a no-`-t` boot free-run compute() >= K ticks;
+  # b: does the sim write CIQ_LOG.YML on Linux; c: per-class crash-channel map) so
+  # a human can (i) confirm the gate is real and (ii) calibrate the liveness floor
+  # from the measured tick-rate before promotion. It is promoted to ci-required ONLY
+  # after the AC-5 >=10-run RED/GREEN differential (see docs/connectiq-ci-setup.md).
+  # If AC-1 shows the boot does NOT free-run on Linux, #124 is a documented dead-end
+  # (no fake-green) — the advisory job simply reports FAIL and nothing is gated.
+  boot-smoke:
+    name: Boot-smoke (headless DataField boot, advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    container:
+      # Same digest-pinned SDK 9.2.0 image as the other SDK jobs.
+      image: ghcr.io/matco/connectiq-tester@sha256:7a6f586cb0e0393ff288da09cf27b6dad40a0058a346c529b99fd0fc19858f0f   # v2.8.0 = SDK 9.2.0
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+      - name: Ensure tools present (guarded, like the simulate job)
+        run: |
+          set -eux
+          need() { command -v "$1" >/dev/null 2>&1; }
+          if need openssl && need Xvfb && need xdpyinfo && need ss && need pgrep; then exit 0; fi
+          apt-get update
+          apt-get install -y openssl xvfb x11-utils iproute2 procps
+      - name: Build shipping .prg (monkey.jungle) + residue gate
+        run: |
+          set -eux
+          openssl genrsa -out developer_key.pem 4096
+          openssl pkcs8 -topk8 -inform PEM -outform DER -in developer_key.pem -out developer_key.der -nocrypt
+          mkdir -p bin
+          # Shipping build uses the no-op BootSmoke stub (monkey.jungle) — the
+          # FM_TICK literal must be provably absent from THIS -d .prg.
+          monkeyc -f monkey.jungle -o bin/FatigueMeter-shipping.prg -y developer_key.der -d edge1050 -w
+          bash scripts/check_boot_residue.sh bin/FatigueMeter-shipping.prg
+      - name: Build boot-smoke .prg (monkey.bootsmoke.jungle)
+        run: |
+          set -eux
+          # Boot-smoke build swaps in the FM_TICK-emitting BootSmoke variant.
+          monkeyc -f monkey.bootsmoke.jungle -o bin/FatigueMeter-bootsmoke.prg -y developer_key.der -d edge1050 -w
+      - name: Boot headlessly (no -t) + fail-closed verdict + AC-1 diagnostic
+        run: bash scripts/run_boot_smoke.sh bin/FatigueMeter-bootsmoke.prg edge1050
+      - name: Upload boot-smoke logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4.6.2
+        with:
+          name: boot-smoke-logs
+          path: |
+            boot-smoke.log
+            boot-smoke-ciqlog.yml
+            boot-smoke.rc
+            sim-sim.log
+
   # -------------------------------------------------- required-check aggregator
   # Single stable status-check name to require in branch protection. Lists every
-  # REQUIRED job; `traceability` stays advisory and out of the set. If any needed
-  # job fails, this job is SKIPPED (never "success"), so branch protection that
-  # requires the `ci-required` context blocks the merge.
+  # REQUIRED job; `traceability` + `boot-smoke` stay advisory and out of the set.
+  # If any needed job fails, this job is SKIPPED (never "success"), so branch
+  # protection that requires the `ci-required` context blocks the merge.
   #
   # BRANCH-PROTECTION CHECKLIST (repo admin, one-time -- the YAML alone enforces
   # nothing without it):
