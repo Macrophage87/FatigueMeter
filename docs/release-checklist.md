@@ -62,19 +62,20 @@ back to the matching item here.
     pure decode/reopen/staleness predicates (`rrDelta`, `shouldReopen`,
     `stallExpired`, `hrByteValid`) are unit-tested (#47/#11/#24).
 
-- [ ] **Release image — data-field runtime peak-heap** (`source/FatigueMeterView.mc`, #91/#93)
+- [ ] **Release image — data-field runtime peak-heap** (`source/FatigueMeterView.mc`, #91/#103/#104)
   - The required `release-build` CI job compiles the non-`--unit-test` release
     `.prg` for all 8 devices and fails on the compiler's **static** data-field
     memory-budget error — but the compiler cannot see **runtime peak heap**
     (allocations during `compute()`/`onUpdate`: `toArray()` copies, the Kalman
     temp-matrix cascade, `DfaAlpha1.compute`'s `y = new [N]`, plus the ~25–40 KB
-    of fixed construction ring buffers per #93). Open the simulator's **Active
-    Memory** profiler on **edge1050** (and, per #93, on the tighter budgets —
+    of fixed construction ring buffers, historically #93). Open the simulator's **Active
+    Memory** profiler on **edge1050** (and, per #103/#104, on the tighter budgets —
     `edge540` / `edge840` / `edgeexplore2` / `fr955` / `fenix7x`), drive a ride, and
     confirm peak stays within each device's data-field cap. This is the one lever
     that can confirm/refute #90 root-cause #3 (load-time / runtime OOM).
-  - **#93 AC-1 procedure (this is #93's sole closure gate — owner-run, CI can't
-    automate it).** Reproducibly:
+  - **AC-1 procedure — the exit criteria for issue #104 (owner-run, CI can't
+    automate it; #93's footprint remediations already landed via #95/#99, and #104
+    was split out of #103 to carry this measurement).** Reproducibly:
     1. **Per-device cap:** read each device's data-field memory limit from the SDK
        device definition (the *same* budget `monkeyc` applies in the `release-build`
        gate) — the caps are SDK-owned, not in-repo. Record it per device.
@@ -86,11 +87,14 @@ back to the matching item here.
     3. **Read Active Memory** at four phases per device and tabulate vs the cap:
        **construction**, **first-compute**, **fill-phase** (the #95 lazy-grow ramp),
        **steady-state** (post-20-min).
-    4. **Outcome:** if no device is within ~10 % of its cap → **close #93** as
-       "profiled, not over budget" with the table attached. If a device shows
-       pressure → apply an AC-2 fix (e.g. the #93 `toArray()` snapshot dedup already
-       landed; then weigh remediation #4, window resize, only with a fatigue-output
-       regression on this fixture — it is model-altering).
+    4. **Outcome:** if no device is within ~10 % of its cap → **close #104** as
+       "profiled, not over budget" with the table attached, and set #90/#103
+       priority per the verdict (OOM refuted → pursue #90 as a VM-level init fault
+       separately). If a device shows pressure → **confirmed runtime OOM**: escalate
+       #104/#103 to Critical and land the #103 remediation cut-list (render-first
+       `ensureBuilt()` + lazy `SessionStore`/`FitLogger` loads); physiological
+       window resize (model-altering) only with a fatigue-output regression on this
+       fixture.
 
     One row **per device** (Step 1 records the cap per device, so don't group them):
 
