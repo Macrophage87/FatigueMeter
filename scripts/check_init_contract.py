@@ -9,28 +9,35 @@ raises the same UNCATCHABLE `System Error: 'Failed invoking '` INSIDE `initializ
 too -- so R1 mandated the fatal placement and this check was **green on a bricked
 build** (passing R1/R2 and bricking became the same fact). It is therefore DEMOTED
 to advisory (out of ci-required.needs, #131) and must NOT be treated as a gate for
-this crash class. The fault is the createField INVOCATION (a symbol-resolution/
-dispatch abort, likely FitContributor not *effective* in the packaged binary),
-independent of lifecycle phase; the authoritative net is on-device (a lexical check
-cannot verify a runtime capability guard or transitive reachability).
+this crash class. The fault is the createField INVOCATION itself -- uncatchable and
+independent of lifecycle phase (both proven on-device) -- but its exact MECHANISM is
+still OPEN pending #130's Part B probe: symbol-absent (a resolution/dispatch abort;
+likely FitContributor not *effective* in the packaged binary) vs present-but-
+misinvoked. The authoritative net is on-device (a lexical check cannot verify a
+runtime capability guard or transitive reachability).
 
 R1 will be RE-SCOPED once #130's mechanism is confirmed: from "createField must be
 in initialize()" to R1' "a `df has :createField` capability guard must dominate
-every createField" (guard, not placement, is load-bearing). R2 (.createField(
-confined to FitLogger.mc) is a valid-but-insufficient code-org rule and stays.
+every createField" (the guard is EXPECTED to be load-bearing -- pending #130 Part B
+confirmation). R2 (.createField( confined to FitLogger.mc) is a valid-but-
+insufficient code-org rule and stays.
 
 Structured as a small RULE REGISTRY so #114 (method(:hidden) cross-scope, R3) and
 the re-scoped R1' can register here rather than shipping N overlapping scripts.
 
-Rules (both HARD -- exit non-zero on violation):
-  R1  In source/FatigueMeterView.mc, `new FitLogger(` must appear ONLY inside the
-      `initialize()` function body -- never in `ensureBuilt()`, `computeInner()`,
-      or any other method. FitLogger's ctor creates FitContributor fields, so
-      constructing it anywhere but initialize() re-ships the #116 brick.
-  R2  `.createField(` may appear ONLY in source/FitLogger.mc. FitLogger is the one
-      class whose construction R1 pins to initialize(); a createField call in any
-      other module would be a new, unpinned field-creation site on an unknown
-      lifecycle phase.
+Rules (ADVISORY since #131 -- the job is `continue-on-error`; the script still
+exits non-zero so its findings are visible, but it no longer gates merges):
+  R1  (#130-FALSIFIED premise -- do NOT act on an R1 finding by "moving to
+      initialize()".) In source/FatigueMeterView.mc, `new FitLogger(` appears inside
+      the `initialize()` function body. R1 was built on the disproven init-only
+      contract; #130 showed createField bricks INSIDE initialize() too, so relocating
+      is not the fix -- a `df has :createField` capability guard is (R1', deferred to
+      #130's mechanism). Kept only to flag an accidental move onto the compute path
+      (which is separately undesirable), NOT to mandate init-only placement.
+  R2  `.createField(` may appear ONLY in source/FitLogger.mc. A valid code-org rule
+      (single field-creation chokepoint) independent of the R1 phase premise: a
+      createField call in another module would be a new, unpinned field-creation
+      site. This rule stands.
 
 AST-lite by design: Monkey C class methods are not nested, so a brace/paren
 scanner that ignores comments and string literals maps every code occurrence to
@@ -147,9 +154,9 @@ def rule_r1_fitlogger_init_only(errors):
     hits = [m.start() for m in re.finditer(r"\bnew\s+FitLogger\s*\(", text)
             if mask[m.start()]]
     if not hits:
-        print(f"::error::{f.name}: no `new FitLogger(` found in code -- the FIT "
-              f"logger construction site vanished; R1 can't confirm it is init-only "
-              f"(refactor? verify FitContributor fields still register in initialize()).")
+        print(f"::warning::{f.name}: no `new FitLogger(` found in code -- the FIT "
+              f"logger construction site vanished (refactor? verify FitContributor "
+              f"fields still register somewhere, guarded by `df has :createField`).")
         errors.append("R1-no-construction")
         return
     for off in hits:
@@ -157,14 +164,16 @@ def rule_r1_fitlogger_init_only(errors):
         ln = lineno(text, off)
         if where == "initialize":
             print(f"ok: {f.name}:{ln}: `new FitLogger(` is inside initialize() "
-                  f"(FitContributor field creation stays init-only, #116).")
+                  f"(advisory #131; the init-only premise is #130-falsified, so this "
+                  f"is informational, not a safety guarantee).")
         else:
-            print(f"::error::{f.name}:{ln}: `new FitLogger(` is inside "
-                  f"`{where or '<class scope>'}()`, NOT initialize(). FitLogger's ctor "
-                  f"calls FitContributor.createField(), which is INIT-ONLY -- "
-                  f"constructing it on the compute path (e.g. ensureBuilt/computeInner) "
-                  f"re-ships the #116 uncatchable System Error brick. Move it back into "
-                  f"initialize().")
+            print(f"::warning::{f.name}:{ln}: `new FitLogger(` is inside "
+                  f"`{where or '<class scope>'}()`, not initialize(). ADVISORY (#131): "
+                  f"the init-only contract is #130-FALSIFIED -- do NOT 'move it back to "
+                  f"initialize()' as the fix (createField bricks there too); the real "
+                  f"fix is a `df has :createField` capability guard (R1', deferred). "
+                  f"This finding only flags an accidental move onto the compute path, "
+                  f"which is separately undesirable.")
             errors.append(f"R1:{where}")
 
 
@@ -203,11 +212,13 @@ def main():
     for rule in RULES:
         rule(errors)
     if errors:
-        print(f"::error::init-contract lint FAILED ({len(errors)} violation(s)) -- "
-              f"FitContributor field creation must stay on the init-only path (#116).")
+        print(f"::error::init-contract lint (ADVISORY #131) found {len(errors)} "
+              f"finding(s) -- see above. NB the init-only premise is #130-falsified; "
+              f"R2 (createField confined to FitLogger.mc) is the still-valid rule.")
         return 1
-    print("init-contract lint OK (FitLogger construction is init-only; "
-          "createField confined to FitLogger).")
+    print("init-contract lint OK (advisory #131): `new FitLogger(` in initialize(); "
+          "createField confined to FitLogger.mc (R2). R1's init-only premise is "
+          "#130-falsified and awaits the R1' guard-dominance re-scope.")
     return 0
 
 
