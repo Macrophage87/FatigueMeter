@@ -769,6 +769,53 @@ module CoverageTests {
         return okNoTok && okGarbage;
     }
 
+    // ---- #112: bounded, non-destructive recovery-marker convergence ----
+    (:test)
+    function testShouldSuppressRecoveryMarkerBoundary(logger) {
+        // The recurring recovery/SAVE_FAILED marker shows while attempts < cap and
+        // suppresses at/above cap. A >=-vs-> bug would either nag forever (never
+        // suppress) or hide a legitimate FIRST recovery. cap == RECOVER_MARKER_CAP.
+        var okBelow = (SessionStore.shouldSuppressRecoveryMarker(0, 3) == false);
+        var okNear  = (SessionStore.shouldSuppressRecoveryMarker(2, 3) == false);
+        var okAt    = (SessionStore.shouldSuppressRecoveryMarker(3, 3) == true);
+        var okAbove = (SessionStore.shouldSuppressRecoveryMarker(5, 3) == true);
+        return okBelow && okNear && okAt && okAbove;
+    }
+
+    (:test)
+    function testRecoverAttemptsOfDefaults(logger) {
+        // Fresh checkpoint (no key) -> 0; a stamped count reads through; a non-Number
+        // or non-dict value defaults to 0 (never throws on a foreign/legacy value).
+        var rec = SessionStore.buildResult(1,3600,50.0,8.0,42.0, 0.0,0.0,0.0,0.0, 0.0,0.0,0.0,0,0.0, "moderate",5.0);
+        var okFresh = (SessionStore.recoverAttemptsOf(rec) == 0);
+        rec.put("recoverAttempts", 2);
+        var okStamped = (SessionStore.recoverAttemptsOf(rec) == 2);
+        rec.put("recoverAttempts", "bad");
+        var okBadType = (SessionStore.recoverAttemptsOf(rec) == 0);
+        var okNonDict = (SessionStore.recoverAttemptsOf("not a dict") == 0);
+        return okFresh && okStamped && okBadType && okNonDict;
+    }
+
+    (:test)
+    function testRecoveryMarkerConverges(logger) {
+        // Convergence proof: over repeated failed-persist boots the marker is shown
+        // for the first RECOVER_MARKER_CAP recoveries then PERMANENTLY suppressed,
+        // while the attempt count increments monotonically. (The ride is structurally
+        // RETAINED every boot on reconcileActive's writeFailed branch — never dropped;
+        // this pins the boundary that stops the recurring nag.)
+        var cap = 3;
+        var attempts = 0;
+        var shownCount = 0;
+        var silentAfterCap = true;
+        for (var boot = 0; boot < 8; boot++) {
+            var shown = !SessionStore.shouldSuppressRecoveryMarker(attempts, cap);
+            if (shown) { shownCount++; }
+            if (attempts >= cap && shown) { silentAfterCap = false; }   // must be silent at/after cap
+            attempts += 1;   // best-effort bump modeling each failed persist
+        }
+        return (shownCount == cap) && silentAfterCap && (attempts == 8);
+    }
+
     (:test)
     function testSessionTokenSurvivesSanitizeRoundTrip(logger) {
         // Dedup keystone (#17): sessionToken must survive load()'s sanitize() so a

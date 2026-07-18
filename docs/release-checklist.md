@@ -50,6 +50,19 @@ back to the matching item here.
     same recovery chain on the sim in the required `simulate` job; this manual step
     confirms it on real hardware, where the device-only stored-state that provoked
     #90 actually lives.)
+  - **Recovery-marker convergence under a persistently-failing store (#112)**: fill
+    Storage so `persist()` genuinely fails (the manual full-store setup, per #65),
+    leave a valid in-progress `KEY_ACTIVE`, then reboot the field **`RECOVER_MARKER_CAP`
+    (3) + 1 or more times**. Confirm on every boot: (i) the field paints (§8.4, no
+    brick); (ii) the ride is **never dropped** — `KEY_ACTIVE` still holds the same
+    `sessionToken` each boot; (iii) the "not saved" recovery marker shows for the
+    first ~3 boots then **stops re-firing** (the best-effort `recoverAttempts`
+    counter reaching the cap), while `persist()` keeps retrying so the ride saves the
+    instant storage frees. This closes the one gap the `(:test)` suite can't force:
+    the pure boundary (`shouldSuppressRecoveryMarker`) and the *suppressed terminal
+    state* (RecoveryBootTests Fixture 7, seeded at the cap) ARE gated in CI, but the
+    cross-boot counter **write-back under a real failing store** is non-deterministic
+    in the sim (#65) and is verified here.
 
 - [ ] **FatigueMeterView — `onUpdate` / `dc.*` render** (`source/FatigueMeterView.mc`)
   - The glance screen paints without crashing across the sensor-availability
