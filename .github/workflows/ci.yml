@@ -45,21 +45,25 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
       - run: ./scripts/check_manifest_appid.sh
 
-  # ------------------------------------------------------- init-contract lint
-  # REQUIRED (#116). Deterministic, runner-free, no SDK: fails if
-  # `new FitLogger(` sits anywhere but FatigueMeterView.initialize() or if
-  # `.createField(` appears outside FitLogger.mc. FitContributor.createField() is
-  # INIT-ONLY on Connect IQ; #108's render-first deferred it onto the compute path
-  # and shipped an uncatchable `System Error: 'Failed invoking '` that bricks the
-  # field after one frame (#116) -- bypassing every §8.4 try/catch, so neither the
-  # compile nor the (:test) run catches it. This static containment check is the one
-  # gate that WOULD have caught #108 pre-merge. It owns exactly the lexical
-  # invariant; the broader init/compute-crash class is #113's dynamic boot->=1-tick
-  # net. Required: in ci-required.needs, no continue-on-error.
+  # ------------------------------------------------- init-contract lint (adv)
+  # ADVISORY (#131 — DEMOTED from ci-required). This lint's axiom —
+  # "FitContributor.createField() is legal ONLY during initialize()" — was
+  # **FALSIFIED on-device by #130**: createField raises the same uncatchable
+  # `System Error: 'Failed invoking '` INSIDE initialize() too (the field renders
+  # ZERO frames), so R1 mandated the fatal placement and, as a hard ci-required
+  # gate, it was **green on a bricked build** (passing R1/R2 and bricking became the
+  # same fact) and #117 wrongly marketed it as "the definitive confirmation this
+  # class is fixed." Demoted to advisory so it no longer certifies a bricked tree as
+  # green. It still RUNS and prints R1/R2 findings for diagnostics; the authoritative
+  # net for this crash class is on-device (the boot-smoke #124/#128 dynamic net is
+  # itself advisory and segfaults on the Linux sim). R1 will be re-scoped to a
+  # guard-dominance rule (R1') once #130's mechanism is confirmed; R2
+  # (.createField(-confined-to-FitLogger.mc) is a valid code-org rule and stays.
   init-contract:
-    name: Init-contract lint (FitContributor init-only)
+    name: Init-contract lint (advisory)
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    continue-on-error: true
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
       - run: python3 scripts/check_init_contract.py
@@ -410,9 +414,10 @@ jobs:
 
   # -------------------------------------------------- required-check aggregator
   # Single stable status-check name to require in branch protection. Lists every
-  # REQUIRED job; `traceability` + `boot-smoke` stay advisory and out of the set.
-  # If any needed job fails, this job is SKIPPED (never "success"), so branch
-  # protection that requires the `ci-required` context blocks the merge.
+  # REQUIRED job; `init-contract` (#131), `traceability`, and `boot-smoke` stay
+  # advisory and out of the set. If any needed job fails, this job is SKIPPED
+  # (never "success"), so branch protection that requires the `ci-required`
+  # context blocks the merge.
   #
   # BRANCH-PROTECTION CHECKLIST (repo admin, one-time -- the YAML alone enforces
   # nothing without it):
@@ -426,6 +431,6 @@ jobs:
     name: ci-required
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [ manifest-lint, init-contract, test, simulate, release-build ]
+    needs: [ manifest-lint, test, simulate, release-build ]
     steps:
-      - run: echo "manifest lint + init-contract lint + unit-test compile + unit-test run + release build all passed"
+      - run: echo "manifest lint + unit-test compile + unit-test run + release build all passed"

@@ -1,20 +1,26 @@
 #!/usr/bin/env python3
-"""#116 recurrence lint -- keep FitContributor field creation on the INIT-ONLY path.
+"""#116 recurrence lint -- ADVISORY (#131). Historically kept FitContributor field
+creation on an "init-only" path.
 
-Connect IQ contract: `FitContributor.createField()` is legal ONLY during a
-DataField's `initialize()`. #108's render-first restructure (#103) deferred
-`new FitLogger(self)` -- whose constructor calls `createField()` via
-createRecordFields/createSessionFields -> mkRec/mkSes -- into `ensureBuilt()` on
-the COMPUTE path, so `createField` ran on tick 1 (out of phase) and raised an
-UNCATCHABLE `System Error: 'Failed invoking '` that bypasses every §8.4 try/catch
-and bricks the field one frame after the NODATA baseline paints (#116). This is
-the precise, deterministic, storage-independent check that would have caught #108
-pre-merge -- no simulator, no SDK, no device needed.
+FALSIFIED AXIOM (#130): this lint was built on the contract "`FitContributor.
+createField()` is legal ONLY during a DataField's `initialize()`." An on-device
+retest (#130, Edge 1050, FW 31.33 / CIQ 6.0.2) proved that FALSE: `createField`
+raises the same UNCATCHABLE `System Error: 'Failed invoking '` INSIDE `initialize()`
+too -- so R1 mandated the fatal placement and this check was **green on a bricked
+build** (passing R1/R2 and bricking became the same fact). It is therefore DEMOTED
+to advisory (out of ci-required.needs, #131) and must NOT be treated as a gate for
+this crash class. The fault is the createField INVOCATION (a symbol-resolution/
+dispatch abort, likely FitContributor not *effective* in the packaged binary),
+independent of lifecycle phase; the authoritative net is on-device (a lexical check
+cannot verify a runtime capability guard or transitive reachability).
 
-This is the #116-specific slice of #115's two-sided init-contract invariant. It is
-structured as a small RULE REGISTRY so #114 (method(:hidden) cross-scope) and any
-further #115 rules can register here rather than shipping as separate overlapping
-scripts.
+R1 will be RE-SCOPED once #130's mechanism is confirmed: from "createField must be
+in initialize()" to R1' "a `df has :createField` capability guard must dominate
+every createField" (guard, not placement, is load-bearing). R2 (.createField(
+confined to FitLogger.mc) is a valid-but-insufficient code-org rule and stays.
+
+Structured as a small RULE REGISTRY so #114 (method(:hidden) cross-scope, R3) and
+the re-scoped R1' can register here rather than shipping N overlapping scripts.
 
 Rules (both HARD -- exit non-zero on violation):
   R1  In source/FatigueMeterView.mc, `new FitLogger(` must appear ONLY inside the
