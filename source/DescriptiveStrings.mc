@@ -58,6 +58,7 @@ module DescriptiveStrings {
     function advisoryTag() { return load(Rez.Strings.AdvisoryTag); }
     function uncalibratedTag() { return load(Rez.Strings.UncalibratedTag); }
     function decoupOnlyTag() { return load(Rez.Strings.DecoupOnlyTag); }
+    function fitUnavailableTag() { return load(Rez.Strings.FitUnavailableTag); }   // #130
     function degradedTag() { return load(Rez.Strings.DegradedTag); }   // #28 compute-stall marker
     function notMedical() { return load(Rez.Strings.NotMedical); }
 
