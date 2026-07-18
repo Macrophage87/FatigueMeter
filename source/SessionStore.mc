@@ -253,6 +253,8 @@ class SessionStore {
             // still saves the instant storage frees. `lastWriteFailed()` and the
             // retained KEY_ACTIVE remain the durable "not saved" signal; only the
             // repeating footer nag is silenced (after up to RECOVER_MARKER_CAP shows).
+            // Human-facing consequence (the post-cap SAVE_OK-while-writeFailed mute)
+            // and why it is safe: see pendingSaveOutcome()'s #112 intentional-mute note.
             var attempts = recoverAttemptsOf(d);
             recoveredThisLoad = !shouldSuppressRecoveryMarker(attempts, RECOVER_MARKER_CAP);
             d.put("recovered", true);   // rebuilt from the last checkpoint (<=1 cadence stale)
@@ -323,6 +325,22 @@ class SessionStore {
     //! durable save didn't complete) OUTRANKS a trim on the last onStop-ride
     //! (TRIMMED). Both are read-once/per-load so the marker is transient. Returns a
     //! DescriptiveStrings.SAVE_* severity (SAVE_OK = nothing to show).
+    //!
+    //! #112 intentional-mute note: this folds `recoveredThisLoad`, which
+    //! reconcileActive() deliberately SUPPRESSES once a checkpoint has failed to
+    //! persist RECOVER_MARKER_CAP times. So after the cap the human-facing marker
+    //! goes SAVE_OK (silence — SAVE_OK renders the empty string, NOT a false
+    //! "Saved ✓") EVEN WHILE `lastWriteFailed()` is still true and KEY_ACTIVE still
+    //! holds the un-saved ride. That mute is by design (bounding the recurring
+    //! recovery nag), and it is SAFE because the ride is provably retained + retried
+    //! every boot (never dropped) and saves the instant storage frees. The durability
+    //! state is preserved PROGRAMMATICALLY via lastWriteFailed()/KEY_ACTIVE, not on
+    //! the footer, after the cap. A dedicated persistent-but-quiet "not saved
+    //! (retrying)" footer state driven off lastWriteFailed() (a new user-facing
+    //! severity) is intentionally OUT OF SCOPE for this hardening; the safety of the
+    //! post-cap SAVE_OK-while-writeFailed state is verified by the #112
+    //! release-checklist manual step (not (:test)-able — forcing a real persist
+    //! failure is non-deterministic in the sim, #65).
     function pendingSaveOutcome() {
         return DescriptiveStrings.saveMarkerSeverity(recoveredThisLoad, trimmedOnLoad);
     }

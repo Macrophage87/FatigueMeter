@@ -206,6 +206,14 @@ module RecoveryBootTests {
         // (attempts 0 -> SAVE_FAILED shown): same recovery, marker bounded, ride never
         // dropped. (The cross-boot best-effort counter-WRITE under a real failing
         // persist is the one part a headless (:test) can't force — release-checklist.)
+        //
+        // SCOPE NOTE (test-integrity, PR review): here persist() SUCCEEDS (empty sim
+        // store), so KEY_ACTIVE is cleared and the ride IS durably saved — SAVE_OK is
+        // therefore HONEST. This fixture does NOT (and cannot headlessly) cover the
+        // riskier post-cap combination SAVE_OK *while* writeFailed==true AND KEY_ACTIVE
+        // retained (which needs a real persist failure, non-deterministic in-sim, #65).
+        // That intentional-mute-is-safe case is the #112 release-checklist manual step;
+        // do not read this fixture as proving "SAVE_OK at cap is always fine".
         clearAll();
         var chk = validRecord(11, 424243);
         chk.put("recoverAttempts", 3);              // == RECOVER_MARKER_CAP -> marker suppressed

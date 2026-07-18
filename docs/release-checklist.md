@@ -58,11 +58,19 @@ back to the matching item here.
     `sessionToken` each boot; (iii) the "not saved" recovery marker shows for the
     first ~3 boots then **stops re-firing** (the best-effort `recoverAttempts`
     counter reaching the cap), while `persist()` keeps retrying so the ride saves the
-    instant storage frees. This closes the one gap the `(:test)` suite can't force:
-    the pure boundary (`shouldSuppressRecoveryMarker`) and the *suppressed terminal
-    state* (RecoveryBootTests Fixture 7, seeded at the cap) ARE gated in CI, but the
-    cross-boot counter **write-back under a real failing store** is non-deterministic
-    in the sim (#65) and is verified here.
+    instant storage frees; **(iv) the intentional-mute is SAFE** — on the boots AFTER
+    the cap, verify the footer is **silent** (`pendingSaveOutcome() == SAVE_OK`, the
+    empty string — not a false "Saved") **while** `lastWriteFailed()` is still `true`
+    **and** `KEY_ACTIVE` still holds the ride. This is the exact
+    `SAVE_OK`-while-`writeFailed`+`KEY_ACTIVE`-retained combination that a headless
+    `(:test)` cannot force (it needs a real persist failure, non-deterministic in the
+    sim, #65) and that RecoveryBootTests Fixture 7 deliberately does **not** cover
+    (there persist SUCCEEDS, so its `SAVE_OK` is honest). What CI **does** gate: the
+    pure boundary (`shouldSuppressRecoveryMarker`) and the suppressed *terminal state*
+    (Fixture 7, seeded at the cap). What is verified **here**: the cross-boot counter
+    write-back under a real failing store, and that the post-cap footer mute never
+    hides a dropped ride (durability is preserved programmatically via
+    `lastWriteFailed()`/`KEY_ACTIVE`, per `pendingSaveOutcome()`'s #112 note).
 
 - [ ] **FatigueMeterView — `onUpdate` / `dc.*` render** (`source/FatigueMeterView.mc`)
   - The glance screen paints without crashing across the sensor-availability
