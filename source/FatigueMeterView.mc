@@ -62,6 +62,7 @@ class FatigueMeterView extends WatchUi.DataField {
     hidden var dStrapHr;       // strap-HR staleness Metric — DISPLAY ONLY (#57); never fed to the filter/math
     hidden var computeFailStreak;   // consecutive compute() failures; drives the degraded footer marker (#28)
     hidden var dSaveOutcome;        // next-start persistence marker severity (#83); DescriptiveStrings.SAVE_*
+    hidden var dFitUnavailable;     // #130: FIT developer-field logging is off (createField capability absent) — ride not recorded
 
     //! Conservative NODATA defaults written at construction BEFORE the guarded
     //! collaborator build (§8.4, #13): if that build throws, the field is left on
@@ -138,6 +139,7 @@ class FatigueMeterView extends WatchUi.DataField {
         dWriteFailed = false;
         computeFailStreak = 0;   // #28: no compute failures yet
         dSaveOutcome = DescriptiveStrings.SAVE_OK;   // #83: nothing to show until the store reports one
+        dFitUnavailable = false;   // #130: assume logging live until FitLogger reports otherwise
         peakAfi = 0.0;
         lastFreshMatchCount = 0;
 
@@ -159,25 +161,29 @@ class FatigueMeterView extends WatchUi.DataField {
         dPowerAvail = snap[:powerAvail];
         dStationary = snap[:stationary];
 
-        // FitContributor field creation is INIT-ONLY (Connect IQ contract):
-        // FitContributor.createField() is legal ONLY during a DataField's
-        // initialize(). #116 regression -- #103/#108 render-first deferred
-        // `new FitLogger(self)` (whose ctor calls createField via
-        // createRecordFields/createSessionFields -> mkRec/mkSes) into ensureBuilt()
-        // on the COMPUTE path, so createField ran on tick 1 (out of phase) and raised
-        // an UNCATCHABLE `System Error: 'Failed invoking '` that bypasses every §8.4
-        // try/catch (mkRec's, FitLogger.initialize()'s, ensureBuilt()'s, AND
-        // compute()'s top-level guard) and bricks the field one frame after the NODATA
-        // baseline paints. So FitLogger is constructed EAGERLY here -- BOTH its 8
-        // record fields and 6 session fields register inside the legal init window.
-        // Safe to run eager: FitLogger does NO Storage and NO ANT I/O (only createField
-        // + println), so it is NOT the #90/#104 load-HANG suspect (that is the ANT
-        // GenericChannel.open() in registerSensors(), which stays deferred). And
-        // FitLogger.initialize() is TOTAL -- every createField is double-guarded and
-        // `ok` derives from what actually registered -- so this never throws out of
-        // initialize(). Runs after DataField.initialize() above, so `self` is a valid
-        // DataField. See docs/release-checklist.md and #115 (init-contract invariant).
+        // FitLogger is constructed eagerly here. HISTORY: #103/#108 render-first had
+        // deferred it onto the compute path (#116); #117 moved it back into
+        // initialize() on the theory that FitContributor.createField() "is legal ONLY
+        // during initialize()." **#130 FALSIFIED that theory on-device** -- createField
+        // raises the same UNCATCHABLE `System Error: 'Failed invoking '` INSIDE
+        // initialize() too (the field rendered ZERO frames). Phase was never the
+        // variable: the fault is the createField INVOCATION itself (a symbol-resolution
+        // abort, likely FitContributor not effective in the packaged binary), which no
+        // try/catch and no placement can catch. The real fix lives in FitLogger.initialize():
+        // it now GUARDS every createField behind a `df has :createField` capability check
+        // (`has` resolves WITHOUT invoking), so on a binary where it can't resolve, the
+        // call is never made, the ctor returns with logging disabled, and this view
+        // paints its §8.4 NODATA baseline instead of bricking. Placement is therefore
+        // no longer load-bearing (eager-here is fine); the GUARD is. FitLogger does no
+        // Storage/ANT I/O, so it's still not the #90 ANT-hang suspect (that stays
+        // deferred in registerSensors()). See #130, and the `dFitUnavailable` footer
+        // marker below for the silent-loss indicator.
         fit = new FitLogger(self);
+        // #130: surface silent FIT-logging loss. FitLogger guards createField behind
+        // a `has`-capability check, so on a binary where it can't resolve the ctor
+        // returns with logging disabled (not a brick) — reflect that on the footer so
+        // the rider knows the ride isn't being recorded rather than losing it silently.
+        dFitUnavailable = !fit.loggingAvailable();
 
         // Render-first (#103): DEFER the remaining guarded collaborator build +
         // registerSensors() out of initialize() into a one-shot ensureBuilt() at the
@@ -765,6 +771,20 @@ class FatigueMeterView extends WatchUi.DataField {
             } else {
                 var combined = line2 + "  ·  " + mark;
                 if (dc.getTextWidthInPixels(combined, Graphics.FONT_XTINY) <= w) { line2 = combined; }
+            }
+        }
+        // #130: FIT-logging-unavailable marker (distinct from the #83 "not saved"
+        // persistence marker above — that is SessionStore history; this is FIT
+        // developer-field logging to the .FIT file). Same measured, non-masking
+        // append so it never evicts an advisory/save tag; takes line 2 outright when
+        // it is otherwise empty (the common case when logging is off).
+        if (dFitUnavailable) {
+            var fitMark = DescriptiveStrings.fitUnavailableTag();
+            if (line2.equals("")) {
+                line2 = fitMark;
+            } else {
+                var fitCombined = line2 + "  ·  " + fitMark;
+                if (dc.getTextWidthInPixels(fitCombined, Graphics.FONT_XTINY) <= w) { line2 = fitCombined; }
             }
         }
         if (!line2.equals("")) {

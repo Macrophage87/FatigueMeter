@@ -32,6 +32,38 @@ class FitLogger {
         rec = {};
         ses = {};
         ok = false;
+        // #130: FitContributor.createField() is a permission-linked method. On a
+        // binary where FitContributor is not *effective* (e.g. the entitlement was
+        // not baked into the packaged/signed .prg), createField is not bound as an
+        // invocable symbol and calling it raises an UNCATCHABLE `System Error:
+        // 'Failed invoking '` that bricks the field -- bypassing every try/catch, in
+        // ANY lifecycle phase (the #116/#117 "init-only" theory was falsified
+        // on-device, #130). `has` RESOLVES WITHOUT INVOKING, so it is safe on the
+        // render-critical path: if `createField` can't resolve we never call it,
+        // `ok` stays false, and the field renders its §8.4 NODATA baseline with FIT
+        // logging disabled (surfaced by the footer "FIT logging unavailable" marker).
+        var hasCreate = (dataField has :createField);
+        // #130 Part B diagnostic -- owner reads CIQ_LOG on the Edge 1050 (FW 31.33 /
+        // CIQ 6.0.2) to CONFIRM the mechanism; safe to keep, removable once confirmed:
+        //   create=false          -> symbol not linked (FitContributor not effective
+        //                            -> a build/entitlement fix, not source logic).
+        //   create=true but a field still aborts -> linked-but-aborts (entitlement
+        //                            not effective at invoke) or a bad field def.
+        System.println("FM_CAP fitc=" + (Toybox has :FitContributor)
+                       + " create=" + hasCreate);
+        if (Toybox has :FitContributor) {
+            System.println("FM_CAP tfloat=" + (FitContributor has :DATA_TYPE_FLOAT)
+                           + " mrec=" + (FitContributor has :MESG_TYPE_RECORD));
+        }
+        if (!hasCreate) {
+            // Render-survival path: never invoke an unresolvable symbol. FIT logging
+            // stays disabled (`ok` false via deriveOk on empty dicts); the field
+            // renders. The remedy for the symbol-absent cause is a build/entitlement
+            // rebuild+resign (#130), not more source guarding.
+            System.println("FitLogger: createField unavailable; FIT logging disabled, field still renders (#130)");
+            ok = deriveOk(rec.size(), ses.size());
+            return;
+        }
         try {
             createRecordFields(dataField);
             createSessionFields(dataField);
@@ -52,6 +84,12 @@ class FitLogger {
     static function deriveOk(recSize, sesSize) {
         return (recSize > 0) || (sesSize > 0);
     }
+
+    //! #130: true iff FIT developer-field logging is live (at least one field was
+    //! created). False when the createField capability was absent (guarded off) or
+    //! every field was rejected — the view surfaces this as a "FIT logging
+    //! unavailable" footer marker so silent ride-data loss is visible.
+    function loggingAvailable() { return ok; }
 
     hidden function mkRec(df, id, label, units) {
         try {

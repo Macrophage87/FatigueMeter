@@ -23,6 +23,7 @@
     <string id="DegradedTag">compute stalled</string>
     <string id="SaveRecovered">prior ride recovered from checkpoint</string>
     <string id="SaveTrimmed">older history trimmed to fit storage</string>
+    <string id="FitUnavailableTag">FIT logging unavailable — ride not recorded</string>
     <string id="NotMedical">Not a medical device · within-ride fatigue unvalidated outdoors</string>
 
     <!-- (Rev 5) Start-of-ride bucket display strings removed — start-of-ride
