@@ -80,6 +80,15 @@ back to the matching item here.
     — **that static lint is the definitive confirmation this class is fixed** (no device
     needed). On-device, the fix means the field must survive **past tick 1** into live
     tiles, not merely paint one frame.
+  - **§8.4 init-contract audit (white paper §8.4.1)**: the render-first ctors run
+    inside `ensureBuilt()`, so the two-sided init-contract governs them (init-only
+    APIs like `createField()` must stay in `initialize()`; fallible I/O must not sit
+    where a throw is uncatchable). **Anti-rot trigger: any new init-path constructor
+    must be added to the §8.4.1 init-contract audit table** (and checked against both
+    sides) before release. The static tripwire is `scripts/check_init_contract.py`
+    R1 (constructor placement, #116) / R2 (`.createField(` confinement, #116) /
+    R3 (`method(:hidden)` cross-scope, #114); the dynamic net is #113's boot +
+    ≥1-compute-tick.
   - **First-compute-time (#103):** the first tick runs the deferred collaborator build
     (`SessionStore`/config/ANT, **not** FitLogger — now eager) + `registerSensors()` +
     a full `compute()` in one 1 Hz slice under the compute watchdog. Open the sim
