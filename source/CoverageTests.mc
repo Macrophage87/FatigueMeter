@@ -655,10 +655,12 @@ module CoverageTests {
     // a real DataField / FitContributor.
     (:test)
     function testDeriveOkTruthTable(logger) {
+        // Illustrative counts mirror the #136 Build-1 field set (5 record + 1
+        // session); deriveOk only tests >0, so the exact numbers assert nothing.
         var okNone = (FitLogger.deriveOk(0, 0) == false);   // nothing created -> off
-        var okRec  = (FitLogger.deriveOk(8, 0) == true);    // record fields only -> on
-        var okSes  = (FitLogger.deriveOk(0, 6) == true);    // session fields only -> on
-        var okBoth = (FitLogger.deriveOk(8, 6) == true);    // both -> on
+        var okRec  = (FitLogger.deriveOk(5, 0) == true);    // record fields only -> on
+        var okSes  = (FitLogger.deriveOk(0, 1) == true);    // session fields only -> on
+        var okBoth = (FitLogger.deriveOk(5, 1) == true);    // both -> on
         return okNone && okRec && okSes && okBoth;
     }
 
