@@ -287,6 +287,13 @@ class FatigueMeterView extends WatchUi.DataField {
         // Top-level guard (§8.4): compute() must never throw — an uncaught error
         // here blanks the field to the Connect IQ banner and stops all logging.
         try {
+            // #124 boot-smoke heartbeat. No-op in every shipping build (the
+            // source-bootsmoke-stub BootSmoke has an empty body + no FM_TICK
+            // literal); emits `FM_TICK <tick>` ONLY in the monkey.bootsmoke.jungle
+            // build the advisory boot-smoke CI job boots without `-t`, so the parser
+            // can count sustained per-tick liveness. Inside the §8.4 try so it can
+            // never blank the field; harmless no-op cost on device.
+            BootSmoke.tick(tick);
             computeInner(info);
             computeFailStreak = nextFailStreak(computeFailStreak, false);   // a good tick clears the latch
         } catch (e) {

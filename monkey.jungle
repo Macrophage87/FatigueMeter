@@ -17,4 +17,4 @@ base.resourcePath = resources
 # includes them). #92 tags the whole CoverageTests / PureFunctionTests *modules*
 # `(:test)` so that auto-exclusion covers the Fake* doubles + near/posInf/
 # baseStatusCtx helpers too, not just the test functions.
-base.sourcePath = source
+base.sourcePath = source;source-bootsmoke-stub
