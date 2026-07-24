@@ -381,7 +381,9 @@ class FatigueMeterView extends WatchUi.DataField {
         // ---- decoupling + AFI blend ----
         dDecoup = ad[1];   // #93: from the shared snapshot computed above
         var decoupVal = dDecoup.isUsable() ? dDecoup.value : 0.0;
-        var afi = filter.afiBlended(decoupVal, prims.alpha1Artifact());
+        // #139: pass usability so afiBlended can fall back to the Kalman F-state when
+        // decoupling is unavailable or non-informative (<=0%) instead of zeroing AFI.
+        var afi = filter.afiBlended(decoupVal, prims.alpha1Artifact(), dDecoup.isUsable());
         dAfi = afi;
         dAfiUnc = filter.afiUncertainty();
         dSourceSwitched = filter.didSourceSwitch();

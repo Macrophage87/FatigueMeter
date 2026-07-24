@@ -155,9 +155,13 @@ AFI = 100 · clamp( F / F_ref , 0, 1 )   # F_ref = athlete's typical end-of-hard
 ```
 w_rr        = clamp((artifact_max − artifact) / (artifact_max − artifact_good), 0, 1)   # RR-quality weight, 0..1
 AFI_decoup  = 100 · clamp( decoupling% / decoup_ref , 0, 1 )   # decoup_ref chosen so AFI_decoup ≈ AFI at F_ref (common scale)
-AFI         = w_rr · AFI_kalman + (1 − w_rr) · AFI_decoup
+informative = decoupling_usable AND decoupling% > 0            # decoupling carries fatigue evidence (#139)
+w_eff       = informative ? w_rr : 1.0                         # non-informative decoupling falls back to Kalman
+AFI         = w_eff · AFI_kalman + (1 − w_eff) · AFI_decoup
 ```
 Both sources are scaled to the same `F_ref`-equivalent reference. The hand-over is **continuous** in `w_rr` (no hard jump), and the display **marks the moment the dominant source switches** so the dial's history stays interpretable.
+
+**Fallback must be to `AFI_kalman`, not to zero (Rev 4, #139).** Decoupling is a *graceful-degradation fallback* only when it carries fatigue evidence. When the decoupling channel is **unavailable** (no HR) **or non-informative** (`decoupling% ≤ 0` — efficiency recovered after an intensity drop, or "warming up") it is **not** a valid fresh signal and must **not** receive blend weight: with `w_rr → 0` at the artifact gate, the plain formula would degrade AFI to **zero**, discarding a still-valid HR+power Kalman F-state. The effective weight `w_eff` therefore collapses to `1.0` (pure `AFI_kalman`) unless decoupling is *usable and strictly positive*. A usable **positive** decoupling remains a real signal and keeps blending; a usable `≤0%` reading agrees with a fresh Kalman anyway (both ≈0), so the guard only bites when a `≤0%` decoupling would otherwise override a *fatigued* Kalman with RR confirmation gone — exactly the #139 override. The dominant-source dial marker keys off `w_eff`, so it correctly reads **Kalman** during an RR-artifact dropout.
 
 **Concerning-value scale (defaults; provenance and evidence-strength in §9):**
 | AFI / signal | State | Basis |

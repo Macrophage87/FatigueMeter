@@ -120,6 +120,72 @@ module PureFunctionTests {
         return near(wGood, 1.0, 0.001) && near(wGate, 0.0, 0.001);
     }
 
+    // #139 — the effective-weight fallback. When decoupling carries no fatigue
+    // evidence (unavailable OR <=0%), blendWeight must collapse to 1.0 so the blend
+    // returns afiKalman regardless of wRr, instead of zeroing a valid F-state.
+
+    (:test)
+    function testBlendWeightUnusableFallsBackToKalman(logger) {
+        // (a) RR-bad (wRr=0) + decoupling UNUSABLE -> full Kalman weight, not 0.
+        var w = AcuteFatigueFilter.blendWeight(0.0, false, 5.0);
+        var afi = AcuteFatigueFilter.blendAfi(100.0, 0.0, w);
+        return near(w, 1.0, 0.001) && near(afi, 100.0, 0.001);
+    }
+
+    (:test)
+    function testBlendWeightUsableNonPositiveFallsBackToKalman(logger) {
+        // (b) RR-bad (wRr=0) + decoupling USABLE but <=0% (the field case:
+        // efficiency recovered / warming up) -> full Kalman weight, not 0.
+        var wNeg = AcuteFatigueFilter.blendWeight(0.0, true, -3.0);
+        var wZero = AcuteFatigueFilter.blendWeight(0.0, true, 0.0);
+        var afi = AcuteFatigueFilter.blendAfi(100.0, 0.0, wNeg);
+        return near(wNeg, 1.0, 0.001) && near(wZero, 1.0, 0.001)
+            && near(afi, 100.0, 0.001);
+    }
+
+    (:test)
+    function testBlendWeightUsablePositiveStillBlends(logger) {
+        // (c) RR-bad (wRr=0) + decoupling USABLE and POSITIVE -> real signal, keeps
+        // wRr so decoupling still governs (must NOT be discarded).
+        var w = AcuteFatigueFilter.blendWeight(0.0, true, 6.0);
+        var afiD = AcuteFatigueFilter.afiFromDecoupling(6.0, 8.0);
+        var afi = AcuteFatigueFilter.blendAfi(100.0, afiD, w);
+        return near(w, 0.0, 0.001) && near(afi, afiD, 0.001);
+    }
+
+    (:test)
+    function testBlendWeightRrGoodKalmanDominated(logger) {
+        // (d) RR-good -> wRr~1 -> wEff~1 regardless of decoupling -> Kalman-dominated.
+        var wRr = AcuteFatigueFilter.rrWeight(1.0, Constants.ARTIFACT_GOOD, 5.0);
+        var w = AcuteFatigueFilter.blendWeight(wRr, true, 6.0);
+        var afi = AcuteFatigueFilter.blendAfi(100.0, 20.0, w);
+        return near(w, 1.0, 0.001) && near(afi, 100.0, 0.001);
+    }
+
+    (:test)
+    function testAfiBlendedRegressionKalmanNotZeroed(logger) {
+        // (e) instance-level regression for the exact #139 field scenario: drive the
+        // filter (HR+power) until afiKalman()==100, then with RR artifact past the
+        // gate (wRr->0) a usable <=0% decoupling must NOT zero AFI, while a usable
+        // POSITIVE decoupling still pulls AFI below the Kalman estimate.
+        var cfg = new Config();
+        var filt = new AcuteFatigueFilter(cfg);
+        var i = 0;
+        // 185 bpm hard effort above the fresh-HR prediction charges the F-state
+        // (mirrors testRecoveryRelaxesF). Cap the loop so it can never hang.
+        while (i < 6000 && filt.afiKalman() < 100.0) {
+            filt.step(cfg.pAeT + 80.0, 185.0, null, 100.0, 0.0, true, true);
+            i++;
+        }
+        if (!near(filt.afiKalman(), 100.0, 0.001)) { return false; }
+        var artifactBad = cfg.artifactGate + 5.0;    // artifact >= gate -> wRr = 0
+        // usable, <=0% decoupling (efficiency recovered) -> must keep afiKalman (~100)
+        var afiRecovered = filt.afiBlended(-5.0, artifactBad, true);
+        // usable, positive decoupling -> real signal, blend still active (< 100)
+        var afiInformative = filt.afiBlended(6.0, artifactBad, true);
+        return near(afiRecovered, 100.0, 0.001) && afiInformative < 100.0;
+    }
+
     (:test)
     function testChargeGradedAndActiveGated(logger) {
         // charge larger above AeT; kappa_d only while active
