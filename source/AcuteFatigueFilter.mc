@@ -181,6 +181,16 @@ class AcuteFatigueFilter {
         return wRr * afiKalman + (1.0 - wRr) * afiDecoup;
     }
 
+    //! Effective blend weight (§4.5, #139). The decoupling term may pull AFI BELOW
+    //! the Kalman estimate ONLY when it is a usable, positive (informative) reading.
+    //! "Unavailable" and "<=0% / no efficiency loss detected" are NOT evidence of
+    //! freshness that can override a valid HR+power Kalman F-state — so they collapse
+    //! the effective weight to 1.0 (pure afiKalman) rather than handing the blend to
+    //! a non-informative decoupling when RR confirmation is gone (wRr->0).
+    static function blendWeight(wRr, decoupUsable, decoupPct) {
+        return (decoupUsable && decoupPct > 0.0) ? wRr : 1.0;
+    }
+
     // =====================================================================
     //  1 Hz STEP
     // =====================================================================
@@ -333,14 +343,19 @@ class AcuteFatigueFilter {
 
     //! Final AFI: continuous RR-quality blend of Kalman and decoupling-only (§4.5).
     //! Also latches whether the dominant source switched this step (dial marker).
-    function afiBlended(decoupPct, artifactPct) {
+    function afiBlended(decoupPct, artifactPct, decoupUsable) {
         var wRr = rrWeight(artifactPct, Constants.ARTIFACT_GOOD, cfg.artifactGate);
         var afiK = afiKalman();
         var afiD = afiFromDecoupling(decoupPct, cfg.decoupRef);
-        dominantRr = (wRr >= 0.5);
+        // #139: when decoupling is unavailable OR non-informative (<=0%), it carries
+        // no fatigue evidence and must not override a valid Kalman F-state — fall
+        // back to full Kalman weight. Keying the dial latches off the EFFECTIVE
+        // weight makes the source marker reflect reality (Kalman during dropout).
+        var wEff = blendWeight(wRr, decoupUsable, decoupPct);
+        dominantRr = (wEff >= 0.5);
         sourceSwitched = (dominantRr != lastDominantRr);
         lastDominantRr = dominantRr;
-        var afi = blendAfi(afiK, afiD, wRr);
+        var afi = blendAfi(afiK, afiD, wEff);
         lastAfi = afi;
 
         // Update the per-athlete AFI baseline only on steady segments (so surges
