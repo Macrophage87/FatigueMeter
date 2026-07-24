@@ -153,40 +153,63 @@ class Config {
         hrMax    = hr[1];
         sexFemale = bool("sexFemale", false);
 
-        tauHr    = clampTau(num("tauHr", Constants.TAU_HR).toFloat());
-        tauA     = clampTau(num("tauA", Constants.TAU_A).toFloat());
-        tauRec   = clampTau(num("tauRec", Constants.TAU_REC).toFloat());
+        tauHr    = clampTau(num("tauHr", Constants.TAU_HR).toFloat());  // Bucket-C (#141) — still a knob
+        tauA     = clampTau(num("tauA", Constants.TAU_A).toFloat());    // ADVANCED (#140): hidden from menu, property retained
+        // FROZEN (#140): unobservable latent recovery τ — no on-bike ground truth to
+        // fit against, ever (§10). Single source is the constant; clampTau() call
+        // dropped (a constant needs no sanitisation), helper retained (unit-tested).
+        tauRec   = Constants.TAU_REC;
         kappaI   = num("kappaI", Constants.KAPPA_I).toFloat();
         kappaD   = num("kappaD", Constants.KAPPA_D).toFloat();
-        cF       = num("cF", Constants.C_F).toFloat();
+        // DE-KNOBBED (#140): cF is not a user knob. Interim: read the C_F constant.
+        // #141 will make cF fRef-DERIVED (cF = 0.2/fRef) so it recomputes when fRef
+        // is calibrated — it must NOT freeze to a hand-set 0.0167 forever.
+        cF       = Constants.C_F;
         fRef     = clampPositive(num("fRef", Constants.F_REF).toFloat(), 0.1);
-        a0       = num("a0", Constants.SIG_A0).toFloat();
-        a1       = num("a1", Constants.SIG_A1).toFloat();
+        // FROZEN (#140): a0/a1 are UNFITTABLE — the runtime sigmoid consumes them
+        // (AcuteFatigueFilter.a1Target) but CalibrationFit.fitSigmoid hard-codes
+        // SIG_A0/SIG_A1 and never personalizes them, so no fit can move them.
+        a0       = Constants.SIG_A0;
+        a1       = Constants.SIG_A1;
         sigmoidS = num("sigmoidS", Constants.SIG_S).toFloat();
         gP       = num("gP", Constants.G_P).toFloat();
-        qHr      = num("qHr", Constants.Q_HR).toFloat();
-        qHrLat   = num("qHrLat", Constants.Q_HRLAT).toFloat();
-        qA1      = num("qA1", Constants.Q_A1).toFloat();
-        qF       = num("qF", Constants.Q_F).toFloat();
-        rHr      = num("rHr", Constants.R_HR).toFloat();
-        rA1      = num("rA1", Constants.R_A1).toFloat();
+        // FROZEN (#140): Kalman process/measurement noise — hand-set, no on-bike
+        // ground truth; process noise is under-determined, R is a sensor constant.
+        qHr      = Constants.Q_HR;
+        qHrLat   = Constants.Q_HRLAT;
+        qA1      = Constants.Q_A1;
+        qF       = Constants.Q_F;
+        rHr      = Constants.R_HR;
+        rA1      = Constants.R_A1;
 
-        decoupOk      = num("decoupOk", Constants.DECOUP_OK).toFloat();
-        decoupCaution = num("decoupCaution", Constants.DECOUP_CAUTION).toFloat();
-        decoupHigh    = num("decoupHigh", Constants.DECOUP_HIGH).toFloat();
-        // #29: enforce non-decreasing band order so an inverted user setting can't
-        // make the severe tier fire below the elevated one (Part A reads decoupHigh).
-        var db = orderBands(decoupOk, decoupCaution, decoupHigh);
-        decoupOk = db[0]; decoupCaution = db[1]; decoupHigh = db[2];
-        artifactGate  = clampGate(num("artifactGate", 5.0).toFloat());
-        powerCvGate   = num("powerCvGate", 0.10).toFloat();
-        coastFracGate = num("coastFracGate", 0.10).toFloat();
+        // FROZEN (#140): Friel/TrainingPeaks coaching convention. Single source is
+        // the constant; the #29 orderBands() wiring is dropped (the frozen triple is
+        // ordered by construction: 5 < 8 < 10) — helper retained (unit-tested).
+        decoupOk      = Constants.DECOUP_OK;
+        decoupCaution = Constants.DECOUP_CAUTION;
+        decoupHigh    = Constants.DECOUP_HIGH;
+        // ADVANCED (#140): hidden from menu, property retained. TIGHTEN-ONLY — a
+        // sideloaded value may only LOWER the gate to [ARTIFACT_GOOD+0.5, DEFAULT]
+        // (stricter/more honest), never raise it (a looser gate defeats the honesty
+        // gate). Replaces clampGate() + the bare 5.0 literal.
+        artifactGate  = MathUtil.clamp(num("artifactGate", Constants.ARTIFACT_GATE_DEFAULT).toFloat(),
+                                       Constants.ARTIFACT_GOOD + 0.5, Constants.ARTIFACT_GATE_DEFAULT);
+        // FROZEN (#140): validity-envelope gates — loosening only lets a user defeat
+        // the honesty gate.
+        powerCvGate   = Constants.POWER_CV_GATE;
+        coastFracGate = Constants.COAST_FRAC_GATE;
         kjAnchor      = clampPositive(num("kjAnchor", 2000.0).toFloat(), 1.0);
 
-        afiFresh      = num("afiFresh", Constants.AFI_FRESH_MAX).toFloat();
-        afiBuilding   = num("afiBuilding", Constants.AFI_BUILDING_MAX).toFloat();
-        afiBuilding   = atLeast(afiBuilding, afiFresh);   // #29: BUILDING band can't invert below FRESH
-        afiDriftMargin = num("afiDriftMargin", 15.0).toFloat();
+        // FROZEN (#140): AFI display bands (convention). Single source is the
+        // constant; the #29 atLeast() wiring is dropped (30 < 60 by construction) —
+        // helper retained (unit-tested). Per-athlete adaptation still runs through
+        // the AFI-drift baseline (margin below).
+        afiFresh      = Constants.AFI_FRESH_MAX;
+        afiBuilding   = Constants.AFI_BUILDING_MAX;
+        afiDriftMargin = Constants.AFI_DRIFT_MARGIN;
+        // ADVANCED (#140): hidden from menu, property retained. #141 should
+        // AUTO-DERIVE decoupRef alongside fRef — its scale travels with fRef, so a
+        // static manual toggle goes stale on recalibration.
         decoupRef     = clampPositive(num("decoupRef", Constants.DECOUP_REF).toFloat(), 0.1);
 
         featWSev     = num("featWSev", 0.02).toFloat();

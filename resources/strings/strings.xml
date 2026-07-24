@@ -38,39 +38,21 @@
     <string id="SetHrRest">HR rest (bpm)</string>
     <string id="SetSex">Female (HR/TRIMP)</string>
 
+    <!-- #140: FROZEN + de-knobbed + ADVANCED labels removed in lockstep with their
+         settings.xml rows (SetTauA, SetTauRec, SetCf, SetDecoupOk/Caution/High,
+         SetArtifactGate, SetTrimpFemaleCoeff, SetAfiFresh/Building/DriftMargin,
+         SetDecoupRef, SetPowerCvGate, SetCoastFracGate, SetA0, SetA1, SetQHr,
+         SetQHrLat, SetQA1, SetQF, SetRHr, SetRA1). -->
     <string id="SetGroupFilter">Acute filter (advanced)</string>
     <string id="SetTauHr">τ_HR (s)</string>
-    <string id="SetTauA">τ_α1 (s)</string>
-    <string id="SetTauRec">τ_rec (s)</string>
     <string id="SetKappaI">κ_i intensity charge</string>
     <string id="SetKappaD">κ_d duration charge</string>
-    <string id="SetCf">c_F (α1↔F gain)</string>
     <string id="SetFref">F_ref (bpm)</string>
 
     <string id="SetGroupBands">Bands &amp; thresholds</string>
-    <string id="SetDecoupOk">Decoupling OK %</string>
-    <string id="SetDecoupCaution">Decoupling caution %</string>
-    <string id="SetDecoupHigh">Decoupling high %</string>
-    <string id="SetArtifactGate">DFA artifact gate %</string>
     <string id="SetKjAnchor">Durability kJ anchor</string>
-    <string id="SetTrimpFemaleCoeff">TRIMP female coeff (0.86/0.64)</string>
-
-    <string id="SetAfiFresh">AFI fresh cutoff</string>
-    <string id="SetAfiBuilding">AFI building cutoff</string>
-    <string id="SetAfiDriftMargin">AFI drift margin</string>
-    <string id="SetDecoupRef">Decoupling AFI ref %</string>
-    <string id="SetPowerCvGate">Steadiness power CV gate</string>
-    <string id="SetCoastFracGate">Coasting fraction gate</string>
     <string id="SetGp">g_P gain (bpm/W)</string>
-    <string id="SetA0">Sigmoid a0</string>
-    <string id="SetA1">Sigmoid a1</string>
     <string id="SetSigmoidS">Sigmoid slope s</string>
-    <string id="SetQHr">Q HR_ss</string>
-    <string id="SetQHrLat">Q HR</string>
-    <string id="SetQA1">Q α1</string>
-    <string id="SetQF">Q F</string>
-    <string id="SetRHr">R HR</string>
-    <string id="SetRA1">R α1</string>
 
     <string id="SetGroupOptions">Options</string>
     <string id="SetPositivePilot">Numeric AFI unlocked (pilot)</string>
