@@ -40,6 +40,10 @@ constant with no provenance is a defect. All defaults live in
 | `DFA_WINDOW_S / RECOMPUTE_S / BOX_MIN/MAX` | Constants.mc | 120 / 5 / 4 / 16 | DFA pipeline §3.3 | Rogers/Gronwald | High | Pipeline convention (2-min window, 5-s recompute, boxes 4–16) |
 | `ALPHA1_PLAUSIBLE_MIN/MAX` | Constants.mc / DfaAlpha1.mc | 0.2 / 1.7 | DFA-α1 output plausibility §3.3 | Rogers/Gronwald (α1 range) | n/a | Convention / artifact-rejection — a finite α1 outside [0.2, 1.7] is a short/noisy-window artifact (α1 is correlated-ceiling ~1.5); `DfaAlpha1.compute` drops it to the invalid sentinel rather than trusting it (#15) |
 | `ARTIFACT_GOOD` (+ `artifactGate`) | Constants.mc / props | 1 % / 5 % | RR-quality weight §4.5 / artifact gate §3.3 | Rogers/Gronwald | High | w_rr breakpoints; hard artifact gate default 5% (prefer <3%) |
+| `ARTIFACT_GATE_DEFAULT` | Constants.mc `ARTIFACT_GATE_DEFAULT` | 5 % | artifact gate §3.3 | Rogers/Gronwald | High | **Convention** — default + TIGHTEN-ONLY upper bound for the hard artifact gate; `artifactGate` (advanced, hidden) may only LOWER it to `[ARTIFACT_GOOD+0.5, 5.0]`, never raise it (a looser gate defeats the honesty gate) (#140). Replaces the former bare `5.0` literal in `Config.reload` |
+| `POWER_CV_GATE` (was prop `powerCvGate`) | Constants.mc `POWER_CV_GATE` | 0.10 | steadiness/validity gate §3.1 | Convention | n/a | **Convention / validity-envelope** — max power CV for a "steady" window; loosening only lets a user defeat the honesty gate, so FROZEN (#140). Was a bare `0.10` literal in `Config.reload` |
+| `COAST_FRAC_GATE` (was prop `coastFracGate`) | Constants.mc `COAST_FRAC_GATE` | 0.10 | steadiness/validity gate §3.1 | Convention | n/a | **Convention / validity-envelope** — max coasting fraction for a "steady" window; loosening defeats the honesty gate, so FROZEN (#140). Was a bare `0.10` literal |
+| `AFI_DRIFT_MARGIN` (was prop `afiDriftMargin`) | Constants.mc `AFI_DRIFT_MARGIN` | 15.0 | AFI drift vote §4.5 | Convention | n/a | **Convention / display** — how far AFI must sit above the athlete's rolling baseline before the drift vote fires; per-athlete adaptation runs through the drift baseline, so FROZEN (#140). Was a bare `15.0` literal |
 | `RR_STALE_S` | Constants.mc / PrimitivesCalculator.mc | 10 s | graceful degradation §8.4 (staleness timer) | white-paper §8.4 | n/a | Engineering timeout: no fresh RR for this long → α1 marked unavailable (don't emit a stale α1 off an aged buffer), reacquire cleanly |
 | `HR_STALE_S / HR_UNAVAIL_S` | Constants.mc / AntHrm.mc | 5 / 15 s | graceful degradation §8.4 (staleness timer) | white-paper §8.4 | n/a | Engineering timeout (mirror of `RR_STALE_S`): no fresh strap-HR page for this long → HR held-but-STALE (5 s) then UNAVAILABLE (15 s); reacquires on the next valid page (#11) |
 | `RR_FWD_MAX` | Constants.mc / AntHrm.mc | 16 beats | — (engineering guard) | Convention | n/a | **Convention / glitch-rejection** — max forward beat-count step still treated as in-sync; a larger `dCount` (a reordered page's wrapped 8-bit delta, or a long gap) is a RESYNC that drops the baseline rather than rolling `prev*` backward or fabricating an RR (#24) |
@@ -53,10 +57,14 @@ constant with no provenance is a defect. All defaults live in
 | Feat/Attrition weights | EffortCharacterizer.mc | arbitrary | §8.2 red-typing | Synthesis | n/a | No labeled data, no error rate; **off the advisory critical path** |
 
 **Now live settings (review round 1):** the convention/synthesis values that gate
-live output — `afiFresh`/`afiBuilding` (AFI band), `decoupRef` (blend scale), and
-the Feat/Attrition weights (`featWSev`/`featMatchW`/`featBestW`/`attrDriftW`) —
-are read from `Application.Properties` via `Config`, not hard-coded, so changing
-the setting changes behaviour (honesty rule). *(Rev 5: the `seedA/seedB/seedTsbScale`
+live output are read from `Application.Properties` via `Config`, not hard-coded, so
+changing the setting changes behaviour (honesty rule). *(#140: `afiFresh`/
+`afiBuilding` were FROZEN to `AFI_FRESH_MAX`/`AFI_BUILDING_MAX` — display
+convention, per-athlete adaptation runs through the AFI-drift baseline — and the
+17-param FREEZE set removed their property+menu row; `decoupRef` (blend scale) and
+the Feat/Attrition weights `featWSev`/`featMatchW`/`featBestW`/`attrDriftW` remain
+live properties. `decoupRef` is now ADVANCED — hidden from the menu, property
+retained; #141 will auto-derive it alongside `fRef`.)* *(Rev 5: the `seedA/seedB/seedTsbScale`
 seeding-map settings and the `ctlSeed/atlSeed/tsbFresh/tsbOverreach/acwrEnabled`
 cross-ride settings were removed with the on-device Layer-3 state.)* The AFI band also fires on a **per-athlete AFI
 drift** above the athlete's own rolling baseline (`afiDriftAboveBaseline`,

@@ -15,38 +15,28 @@
     <property id="sexFemale"      type="boolean">false</property>
     <!-- (Rev 5) ctlSeed / atlSeed removed — no on-device cross-ride CTL/ATL state. -->
 
-    <!-- Acute Kalman filter seeds / gains (white paper §4.4 — all synthesis-grade) -->
+    <!-- Acute filter knobs. FROZEN synthesis-grade Kalman seeds (tauRec, a0, a1,
+         qHr, qHrLat, qA1, qF, rHr, rA1) and de-knobbed cF were removed in #140 —
+         they are now sourced from Constants.mc (single source of truth). The knobs
+         below stay: tauHr/kappaI/kappaD/fRef/sigmoidS/gP are Bucket-C (live, #141);
+         tauA is ADVANCED (hidden from the menu, property retained so it stays live). -->
     <property id="tauHr"          type="float">30.0</property>
     <property id="tauA"           type="float">90.0</property>
-    <property id="tauRec"         type="float">900.0</property>
     <property id="kappaI"         type="float">0.000145</property>
     <property id="kappaD"         type="float">0.0028</property>
-    <property id="cF"             type="float">0.0167</property>
     <property id="fRef"           type="float">12.0</property>
-    <property id="a0"             type="float">1.0</property>
-    <property id="a1"             type="float">0.5</property>
     <property id="sigmoidS"       type="float">0.02</property>
     <property id="gP"             type="float">0.45</property>
-    <property id="qHr"            type="float">0.5</property>
-    <property id="qHrLat"         type="float">0.5</property>
-    <property id="qA1"            type="float">0.002</property>
-    <property id="qF"             type="float">0.05</property>
-    <property id="rHr"            type="float">4.0</property>
-    <property id="rA1"            type="float">0.0225</property>
 
-    <!-- Layer-1 bands / thresholds (convention defaults) -->
-    <property id="decoupOk"       type="float">5.0</property>
-    <property id="decoupCaution"  type="float">8.0</property>
-    <property id="decoupHigh"     type="float">10.0</property>
+    <!-- Layer-1 thresholds. FROZEN in #140 (decoupOk/Caution/High, powerCvGate,
+         coastFracGate, afiFresh, afiBuilding, afiDriftMargin) — sourced from
+         Constants.mc. artifactGate is ADVANCED (hidden; enforced tighten-only in
+         Config.reload); kjAnchor stays live (Bucket-C, #141). -->
     <property id="artifactGate"   type="float">5.0</property>
-    <property id="powerCvGate"    type="float">0.10</property>
-    <property id="coastFracGate"  type="float">0.10</property>
     <property id="kjAnchor"       type="float">2000.0</property>
 
-    <!-- AFI band cutoffs (convention, F_ref-dependent — must be calibrated §4.5) -->
-    <property id="afiFresh"       type="float">30.0</property>
-    <property id="afiBuilding"    type="float">60.0</property>
-    <property id="afiDriftMargin" type="float">15.0</property>
+    <!-- AFI: decoupRef is ADVANCED (hidden, property retained; #141 auto-derives
+         it alongside fRef — its scale travels with fRef). -->
     <property id="decoupRef"      type="float">8.0</property>
 
     <!-- (Rev 5) Start-of-ride seeding map (seedA/seedB/seedTsbScale) removed —

@@ -521,6 +521,22 @@ module PureFunctionTests {
     }
 
     (:test)
+    function testArtifactGateTightenOnly(logger) {
+        // #140: artifactGate is enforced TIGHTEN-ONLY in Config.reload — a sideloaded
+        // value may only LOWER the gate to [ARTIFACT_GOOD+0.5, ARTIFACT_GATE_DEFAULT]
+        // (stricter/more honest), never raise it above the default (a looser gate
+        // defeats the honesty gate). Mirror the reload() clamp expression exactly.
+        var lo = Constants.ARTIFACT_GOOD + 0.5;    // 1.5
+        var hi = Constants.ARTIFACT_GATE_DEFAULT;  // 5.0
+        var raised    = MathUtil.clamp(20.0, lo, hi);  // above default -> capped to 5.0
+        var tightened = MathUtil.clamp(2.0, lo, hi);   // in-band -> passes through
+        var floored   = MathUtil.clamp(0.0, lo, hi);   // below floor -> 1.5
+        return near(raised, 5.0, 1e-6)
+            && near(tightened, 2.0, 1e-6)
+            && near(floored, lo, 1e-6);
+    }
+
+    (:test)
     function testValidatedHrResetsDegeneratePairs(logger) {
         var inf = posInf();
         var swapped   = Config.validatedHr(60.0, 55.0);   // rest >= max

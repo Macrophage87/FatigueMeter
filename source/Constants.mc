@@ -164,4 +164,19 @@ module Constants {
 
     // RR-quality weight breakpoints (§4.5): w_rr = 1 at artifact_good, 0 at gate.
     const ARTIFACT_GOOD = 1.0;    // <=1% artifact -> full RR weight
+    // Default (and TIGHTEN-ONLY upper bound) for the hard artifact gate (§3.3): a
+    // sideloaded artifactGate may only LOWER this (stricter/more honest), never
+    // raise it — see Config.reload(). Replaces the former bare 5.0 literal (#140).
+    const ARTIFACT_GATE_DEFAULT = 5.0;   // % — hard RR-drop gate default (prefer <3%)
+
+    // ---- Steadiness / validity-envelope gates (white paper §3.1, convention) ----
+    // Glitch/validity gates, NOT physiological anchors: they bound the effort
+    // window in which decoupling & α1 are trustworthy. Loosening them only lets a
+    // user defeat the honesty gate, so they are frozen defaults (#140).
+    const POWER_CV_GATE = 0.10;      // max power CV for a "steady" window (fraction)
+    const COAST_FRAC_GATE = 0.10;    // max coasting fraction for a "steady" window
+    // AFI per-athlete drift margin (bpm-equiv): how far AFI must sit above the
+    // athlete's own rolling baseline before the drift vote fires (§4.5). Display
+    // convention; per-athlete adaptation runs through the drift baseline (#140).
+    const AFI_DRIFT_MARGIN = 15.0;
 }
